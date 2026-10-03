@@ -1,0 +1,13 @@
+import sys, os, subprocess
+worktree = r"D:\Projects\Python\pyqt6_sasCensusApi\.worktrees\pyqt6-sas-census-wizard"
+venv = r"D:\Projects\Python\pyqt6_sasCensusApi\.venv"
+# Find python executables in this venv
+for root, dirs, files in os.walk(venv):
+    for f in files:
+        if f.startswith("python") and (f.endswith(".exe") or f == "python"):
+            p = os.path.join(root, f)
+            r = subprocess.run([p, "-c", "import pytest; print('pytest ok')"], capture_output=True, text=True, timeout=5)
+            if r.returncode == 0:
+                print(p, "has pytest")
+            else:
+                print(p, "NO pytest:", r.stderr.strip()[:80])

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyqt6-sas-census"
+version = "0.1.0"
+description = "Standalone PyQt6 wizard for the SAS Census API"
+requires-python = ">=3.10"
+dependencies = [
+    "PyQt6",
+    "pandas",
+    "httpx",
+]
+
+[project.scripts]
+pyqt6-sas-census = "pyqt6_sas_census.main:main"
+
+[project.optional-dependencies]
+test = ["pytest-qt"]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
