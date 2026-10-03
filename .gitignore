@@ -5,3 +5,10 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+
+
+#Ignore vscode AI rules
+.github\instructions\codacy.instructions.md
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
