@@ -145,7 +145,9 @@ class SasService:
         out_dataset: str,
         api_key_ref: str,
         max_var_count: int,
+        max_rows: int | None = None,
     ) -> OperationResult:
+        """Run the query macro; with max_rows, fetch at most that many result rows."""
         if not self.backend.is_connected:
             return OperationResult(
                 success=False,
@@ -170,10 +172,21 @@ class SasService:
                 libref, table_name = out_dataset.split(".", 1)
             else:
                 libref, table_name = "WORK", out_dataset
-            df = self.backend.fetch_dataframe(table_name, libref)
+            # Ask SAS for one row beyond the cap so truncation can be detected
+            # without loading the whole table into memory.
+            ds_opts = {"obs": max_rows + 1} if max_rows else None
+            df = self.backend.fetch_dataframe(table_name, libref, ds_opts=ds_opts)
+            truncated = False
+            if df is not None and max_rows and len(df) > max_rows:
+                df = df.head(max_rows)
+                truncated = True
             if df is not None:
                 result.dataframe = df
-                result.metadata = {"lib": libref, "dataset": table_name}
+                result.metadata = {
+                    "lib": libref,
+                    "dataset": table_name,
+                    "truncated": truncated,
+                }
 
         return result
 

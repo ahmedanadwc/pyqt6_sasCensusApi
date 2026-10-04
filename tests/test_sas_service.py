@@ -118,3 +118,51 @@ def test_service_submit_query_generates_correct_code():
     )
     assert result.success is True
     assert "%censusapi_submitDataApiQuery" in result.log
+
+
+def _query_args():
+    return dict(
+        api_base_url="https://api.census.gov/data/2000/dec/sf1?",
+        get_clause="get=NAME",
+        for_clause="for=state:*",
+        in_clause="in=",
+        dataset_id="_114_dec_2000",
+        out_dataset="work.sf1_response",
+        api_key_ref="&g_apiKey",
+        max_var_count=50,
+    )
+
+
+def test_service_submit_query_caps_rows_and_flags_truncation():
+    import pandas as pd
+
+    calls = []
+    backend = FakeBackend()
+
+    def fetch(table_name, libref="WORK", ds_opts=None):
+        calls.append(ds_opts)
+        return pd.DataFrame({"a": range(1001)})
+
+    backend.fetch_dataframe = fetch
+    service = SasService(backend)
+    service.connect("oda", "cfg.py")
+
+    result = service.submit_query(**_query_args(), max_rows=1000)
+
+    assert calls == [{"obs": 1001}]
+    assert len(result.dataframe) == 1000
+    assert result.metadata["truncated"] is True
+
+
+def test_service_submit_query_under_cap_is_not_truncated():
+    import pandas as pd
+
+    backend = FakeBackend()
+    backend.fetch_dataframe = lambda *a, **k: pd.DataFrame({"a": range(10)})
+    service = SasService(backend)
+    service.connect("oda", "cfg.py")
+
+    result = service.submit_query(**_query_args(), max_rows=1000)
+
+    assert len(result.dataframe) == 10
+    assert result.metadata["truncated"] is False

@@ -39,6 +39,9 @@ from pyqt6_sas_census.state import WizardState
 from pyqt6_sas_census import config as cfg
 
 
+# Cap on query result rows kept in memory / shown (the SAS table itself is untouched).
+MAX_QUERY_ROWS = 1000
+
 PROFILE_TABLE_SUFFIXES = [
     ("Variables", "_VARS"),
     ("Groups", "_GRPS"),
@@ -491,6 +494,7 @@ class ProfileQueryPage(QWizardPage):
                 out_dataset=self._out_dataset_edit.text().strip(),
                 api_key_ref=self._api_key_ref_edit.text().strip(),
                 max_var_count=self._max_var_count_spin.value(),
+                max_rows=MAX_QUERY_ROWS,
             )
         )
 
@@ -520,6 +524,12 @@ class ProfileQueryPage(QWizardPage):
             if result.dataframe is not None:
                 self._state.step3_query_dataframe = result.dataframe
                 self._query_df_widget.set_dataframe(result.dataframe)
+                if (result.metadata or {}).get("truncated"):
+                    status_label(
+                        self._query_status,
+                        True,
+                        f"Success - showing the first {MAX_QUERY_ROWS:,} rows only",
+                    )
             else:
                 status_label(
                     self._query_status, True, "Query completed but no data returned"
