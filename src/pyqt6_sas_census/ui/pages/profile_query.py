@@ -1,8 +1,9 @@
 """Combined Profile & Query page for the SAS Census wizard (Step 3)."""
 
 from typing import Any, Optional
-from PyQt6.QtCore import QThread, pyqtSlot
+from PyQt6.QtCore import Qt, QThread, pyqtSlot
 from PyQt6.QtWidgets import (
+    QFrame,
     QWizardPage,
     QVBoxLayout,
     QHBoxLayout,
@@ -67,7 +68,19 @@ class ProfileQueryPage(QWizardPage):
         self._setup_ui()
 
     def _setup_ui(self) -> None:
-        layout = QVBoxLayout(self)
+        # Scroll area keeps the page's minimum size small so the wizard never
+        # grows taller than the display; content scrolls instead.
+        page_layout = QVBoxLayout(self)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        content = QWidget()
+        content.setMinimumHeight(900)
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(0, 0, 0, 0)
+        scroll.setWidget(content)
+        page_layout.addWidget(scroll)
 
         # Main splitter for resizable sections
         main_splitter = QSplitter()
