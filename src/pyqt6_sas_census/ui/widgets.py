@@ -1,14 +1,23 @@
 """Reusable Qt widgets for the wizard."""
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 import pandas as pd
-from PyQt6.QtCore import Qt, pyqtSignal, QSortFilterProxyModel, QRegularExpression
+from PyQt6.QtCore import (
+    Qt,
+    pyqtSignal,
+    pyqtSlot,
+    QSortFilterProxyModel,
+    QRegularExpression,
+    QItemSelection,
+    QTimer,
+)
 from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
+    QGridLayout,
     QPushButton,
     QLabel,
     QLineEdit,
@@ -19,6 +28,7 @@ from PyQt6.QtWidgets import (
     QToolButton,
     QApplication,
     QSizePolicy,
+    QComboBox,
 )
 from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QSyntaxHighlighter
 
@@ -218,14 +228,14 @@ class CodePreviewWidget(QWidget):
         self._editor.setFont(QFont("Consolas", 9))
         self._editor.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
 
-        btn_layout = QHBoxLayout()
-        btn_layout.addStretch()
-        self._save_btn = QPushButton("Save .sas")
-        self._save_btn.clicked.connect(self._save_code)
-        btn_layout.addWidget(self._save_btn)
+        #btn_layout = QHBoxLayout()
+        #btn_layout.addStretch()
+        #self._save_btn = QPushButton("Save .sas")
+        #self._save_btn.clicked.connect(self._save_code)
+        #btn_layout.addWidget(self._save_btn)
 
         layout.addWidget(self._editor)
-        layout.addLayout(btn_layout)
+        #layout.addLayout(btn_layout)
 
     def set_code(self, code: str) -> None:
         self._editor.setPlainText(code)
@@ -241,18 +251,152 @@ class CodePreviewWidget(QWidget):
             Path(path).write_text(self._editor.toPlainText(), encoding="utf-8")
 
 
+class CollapsibleCodeWidget(QWidget):
+    """Collapsible/expandable read-only SAS code viewer with header actions."""
+
+    toggled = pyqtSignal(bool)
+
+    def __init__(
+        self,
+        parent: Optional[QWidget] = None,
+        title: str = "Generated SAS Code",
+        expanded: bool = True,
+    ) -> None:
+        super().__init__(parent)
+        self._title = title
+        self._expanded = expanded
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+
+        # Header with toggle button, title, and copy action
+        self._header = QWidget(self)
+        self._header.setObjectName("codePreviewHeader")
+        header_layout = QHBoxLayout(self._header)
+        header_layout.setContentsMargins(4, 2, 4, 2)
+        header_layout.setSpacing(6)
+
+        self._toggle_btn = QToolButton(self._header)
+        self._toggle_btn.setCheckable(True)
+        self._toggle_btn.setChecked(self._expanded)
+        self._toggle_btn.setArrowType(
+            Qt.ArrowType.DownArrow if self._expanded else Qt.ArrowType.RightArrow
+        )
+        self._toggle_btn.setToolTip(
+            "Collapse code" if self._expanded else "Expand code"
+        )
+        self._toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._toggle_btn.toggled.connect(self._on_toggle)
+
+        self._title_btn = QPushButton(self._title, self._header)
+        self._title_btn.setStyleSheet(
+            "QPushButton {"
+            "  border: none;"
+            "  background: transparent;"
+            "  font-weight: bold;"
+            "  font-size: 12px;"
+            "  text-align: left;"
+            "  padding: 0px;"
+            "}"
+            "QPushButton:hover {"
+            "  color: #0284c7;"
+            "}"
+        )
+        self._title_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._title_btn.clicked.connect(self.toggle)
+
+        self._copy_btn = QPushButton("Copy", self._header)
+        self._copy_btn.setToolTip("Copy code to clipboard")
+        self._copy_btn.setFixedHeight(20)
+        self._copy_btn.setStyleSheet("font-size: 10px; padding: 1px 6px;")
+        self._copy_btn.clicked.connect(self._copy_to_clipboard)
+
+        self._save_btn = QPushButton("Save .sas", self._header)
+        self._save_btn.setToolTip("Save code to file")
+        self._save_btn.setFixedHeight(20)
+        self._save_btn.setStyleSheet("font-size: 10px; padding: 1px 6px;")
+        self._save_btn.clicked.connect(self._save_code)
+
+        header_layout.addWidget(self._toggle_btn)
+        header_layout.addWidget(self._title_btn)
+        header_layout.addStretch()
+        header_layout.addWidget(self._copy_btn)
+        header_layout.addWidget(self._save_btn)
+
+        layout.addWidget(self._header)
+
+        # Code content (collapsible)
+        self._code_preview = CodePreviewWidget()
+        self._code_preview.setVisible(self._expanded)
+
+        layout.addWidget(self._code_preview)
+        self._update_size_policy()
+
+    def _on_toggle(self, checked: bool) -> None:
+        self._expanded = checked
+        self._code_preview.setVisible(checked)
+        self._toggle_btn.setArrowType(
+            Qt.ArrowType.DownArrow if checked else Qt.ArrowType.RightArrow
+        )
+        self._toggle_btn.setToolTip("Collapse code" if checked else "Expand code")
+        if self._toggle_btn.isChecked() != checked:
+            self._toggle_btn.setChecked(checked)
+        self._update_size_policy()
+        self.toggled.emit(checked)
+
+    def _update_size_policy(self) -> None:
+        if self._expanded:
+            self.setSizePolicy(
+                QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
+            )
+        else:
+            self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+
+    def toggle(self) -> None:
+        """Toggle collapsed/expanded state."""
+        self.set_expanded(not self._expanded)
+
+    def is_expanded(self) -> bool:
+        """Return True if currently expanded."""
+        return self._expanded
+
+    def set_expanded(self, expanded: bool) -> None:
+        """Programmatically expand or collapse the code viewer."""
+        self._toggle_btn.setChecked(expanded)
+        if self._expanded != expanded:
+            self._on_toggle(expanded)
+
+    def set_code(self, code: str) -> None:
+        self._code_preview.set_code(code)
+
+    def get_code(self) -> str:
+        return self._code_preview.get_code()
+
+    def _copy_to_clipboard(self) -> None:
+        clipboard = QApplication.clipboard()
+        if clipboard:
+            clipboard.setText(self._code_preview.get_code())
+
+    def _save_code(self) -> None:
+        self._code_preview._save_code()
+
+
 class DataFrameWidget(QWidget):
     """Table view with pandas DataFrameModel and row selection."""
 
     row_selected = pyqtSignal(dict)
+    rows_selected = pyqtSignal(list)
 
     def __init__(
         self,
         parent: Optional[QWidget] = None,
         auto_resize_columns: bool = False,
+        multi_select: bool = False,
     ) -> None:
         super().__init__(parent)
         self._auto_resize_columns = auto_resize_columns
+        self._multi_select = multi_select
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
@@ -266,12 +410,34 @@ class DataFrameWidget(QWidget):
         self._filter_edit.textChanged.connect(self._on_filter_changed)
         filter_layout.addWidget(filter_label)
         filter_layout.addWidget(self._filter_edit, 1)
+
+        # Selection mode toggle (only shown if multi_select is True)
+        if self._multi_select:
+            self._select_mode_label = QLabel("Mode:")
+            self._select_mode_combo = QComboBox()
+            self._select_mode_combo.addItems(["Single Select", "Multi Select"])
+            self._select_mode_combo.setCurrentText("Multi Select")
+            self._select_mode_combo.currentTextChanged.connect(
+                self._on_select_mode_changed
+            )
+            filter_layout.addWidget(self._select_mode_label)
+            filter_layout.addWidget(self._select_mode_combo)
+
+            # Clear selection button for multi-select
+            self._clear_selection_btn = QPushButton("Clear Selection")
+            self._clear_selection_btn.clicked.connect(self.clear_selection)
+            filter_layout.addWidget(self._clear_selection_btn)
+
         layout.addLayout(filter_layout)
 
         self._view = QTableView()
         self._view.setAlternatingRowColors(True)
         self._view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self._view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        # Default to multi-select if enabled, otherwise single
+        if self._multi_select:
+            self._view.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
+        else:
+            self._view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self._view.setSortingEnabled(True)
         self._view.horizontalHeader().setStretchLastSection(True)
         self._view.horizontalHeader().setSectionResizeMode(
@@ -285,14 +451,27 @@ class DataFrameWidget(QWidget):
         self._proxy.setFilterCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
         self._proxy.setFilterKeyColumn(-1)
         self._view.setModel(self._proxy)
-        self._view.selectionModel().selectionChanged.connect(self._on_selection_changed)
 
         layout.addWidget(self._view)
+
+    def set_multi_select(self, enabled: bool) -> None:
+        """Enable or disable multi-select mode."""
+        self._multi_select = enabled
+        if enabled:
+            self._view.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
+        else:
+            self._view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
 
     def set_dataframe(self, df: pd.DataFrame) -> None:
         self._model.set_dataframe(df)
         if self._auto_resize_columns:
             self.resize_columns_to_contents()
+        # Connect selection signal after dataframe is set to avoid issues with empty model
+        try:
+            self._view.selectionModel().selectionChanged.disconnect()
+        except RuntimeError:
+            pass  # Signal was not connected
+        self._view.selectionModel().selectionChanged.connect(self._on_selection_changed)
 
     def resize_columns_to_contents(self) -> None:
         """Resize all columns to fit their content."""
@@ -327,22 +506,43 @@ class DataFrameWidget(QWidget):
         """Clear the filter text (reveals all rows)."""
         self._filter_edit.clear()
 
+    def clear_selection(self) -> None:
+        """Clear all row selections."""
+        self._view.clearSelection()
+
+    def selected_rows(self) -> List[dict]:
+        """Return all selected rows as a list of dicts."""
+        indexes = self._view.selectionModel().selectedRows()
+        rows = []
+        for idx in indexes:
+            source = self._proxy.mapToSource(idx)
+            if source.isValid():
+                rows.append(self._model.row_dict(source.row()))
+        return rows
+
     def _on_filter_changed(self, text: str) -> None:
         self._proxy.setFilterFixedString(text.strip())
 
-    def selected_row(self) -> Optional[dict]:
-        indexes = self._view.selectionModel().selectedRows()
-        if not indexes:
-            return None
-        source = self._proxy.mapToSource(indexes[0])
-        if not source.isValid():
-            return None
-        return self._model.row_dict(source.row())
+    def _on_select_mode_changed(self, text: str) -> None:
+        if text == "Multi Select":
+            self._view.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
+        else:
+            self._view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
 
+    @pyqtSlot()
     def _on_selection_changed(self) -> None:
-        row = self.selected_row()
-        if row:
-            self.row_selected.emit(row)
+        # Defer the actual work to avoid issues during selection change
+        QTimer.singleShot(0, self._emit_selection_signals)
+
+    def _emit_selection_signals(self) -> None:
+        # Emit single row selection (for backwards compatibility)
+        rows = self.selected_rows()
+        if rows:
+            self.row_selected.emit(rows[0])
+
+        # Emit all selected rows (for multi-select)
+        if self._multi_select:
+            self.rows_selected.emit(rows)
 
 
 def status_label(label: QLabel, success: bool, message: str) -> None:
@@ -352,3 +552,24 @@ def status_label(label: QLabel, success: bool, message: str) -> None:
         label.setStyleSheet("color: green; font-weight: bold;")
     else:
         label.setStyleSheet("color: red; font-weight: bold;")
+
+
+def make_form_grid() -> QGridLayout:
+    """Grid with two label/field column pairs (label, field, label, field)."""
+    grid = QGridLayout()
+    grid.setColumnStretch(1, 1)
+    grid.setColumnStretch(3, 1)
+    grid.setHorizontalSpacing(10)
+    return grid
+
+
+def add_form_field(
+    grid: QGridLayout, row: int, col: int, label: str, field, span: int = 1
+) -> None:
+    """Place label + field in column pair `col` (0 or 1); span=2 uses the full row."""
+    grid.addWidget(QLabel(label), row, col * 2, Qt.AlignmentFlag.AlignTop)
+    cols = 3 if span == 2 else 1
+    if isinstance(field, QWidget):
+        grid.addWidget(field, row, col * 2 + 1, 1, cols)
+    else:
+        grid.addLayout(field, row, col * 2 + 1, 1, cols)

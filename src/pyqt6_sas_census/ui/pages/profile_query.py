@@ -7,7 +7,6 @@ from PyQt6.QtWidgets import (
     QWizardPage,
     QVBoxLayout,
     QHBoxLayout,
-    QGridLayout,
     QLineEdit,
     QPushButton,
     QLabel,
@@ -28,6 +27,8 @@ from pyqt6_sas_census.ui.widgets import (
     CodePreviewWidget,
     CollapsibleCodeWidget,
     DataFrameWidget,
+    add_form_field,
+    make_form_grid,
     status_label,
 )
 from pyqt6_sas_census.ui.geo_selector_dialog import open_geo_dialog
@@ -95,20 +96,20 @@ class ProfileQueryPage(QWizardPage):
         # Profile parameters: full-width form, fields in two columns
         profile_input_group = QGroupBox("Profile Parameters (%censusapi_getDsFullInfo)")
         profile_input_layout = QVBoxLayout(profile_input_group)
-        profile_grid = self._make_form_grid()
+        profile_grid = make_form_grid()
 
         self._api_lib_edit = QLineEdit("APILIB")
-        self._add_field(profile_grid, 0, 0, "Catalog Library:", self._api_lib_edit)
+        add_form_field(profile_grid, 0, 0, "Catalog Library:", self._api_lib_edit)
 
         self._api_ds_edit = QLineEdit("_API_ALL_DATA")
-        self._add_field(profile_grid, 1, 0, "Catalog Dataset:", self._api_ds_edit)
+        add_form_field(profile_grid, 1, 0, "Catalog Dataset:", self._api_ds_edit)
 
         self._row_id_edit = QLineEdit()
         self._row_id_edit.setPlaceholderText("Row ID from catalog (e.g., 3)")
-        self._add_field(profile_grid, 0, 1, "Row ID:", self._row_id_edit)
+        add_form_field(profile_grid, 0, 1, "Row ID:", self._row_id_edit)
 
         self._profile_report_path_edit = QLineEdit("&g_outputRoot")
-        self._add_field(
+        add_form_field(
             profile_grid, 1, 1, "Report Path:", self._profile_report_path_edit
         )
 
@@ -195,13 +196,13 @@ class ProfileQueryPage(QWizardPage):
         # Query builder: full-width form, fields in two columns
         query_input_group = QGroupBox("Query Builder (%censusapi_submitDataApiQuery)")
         query_input_layout = QVBoxLayout(query_input_group)
-        query_grid = self._make_form_grid()
+        query_grid = make_form_grid()
 
         self._endpoint_edit = QLineEdit()
         self._endpoint_edit.setPlaceholderText(
             "https://api.census.gov/data/2000/dec/sf1?"
         )
-        self._add_field(query_grid, 0, 0, "Endpoint:", self._endpoint_edit, span=2)
+        add_form_field(query_grid, 0, 0, "Endpoint:", self._endpoint_edit, span=2)
 
         self._get_clause_edit = QTextEdit()
         self._get_clause_edit.setPlainText("get=NAME")
@@ -210,11 +211,11 @@ class ProfileQueryPage(QWizardPage):
             "Enter variable names, one per line or comma-separated"
         )
         self._get_clause_edit.textChanged.connect(self._on_query_field_changed)
-        self._add_field(query_grid, 1, 0, "GET Clause:", self._get_clause_edit, span=2)
+        add_form_field(query_grid, 1, 0, "GET Clause:", self._get_clause_edit, span=2)
 
         self._for_clause_edit = QLineEdit("for=state:*")
         self._for_clause_edit.textChanged.connect(self._on_query_field_changed)
-        self._add_field(query_grid, 2, 0, "FOR Clause:", self._for_clause_edit)
+        add_form_field(query_grid, 2, 0, "FOR Clause:", self._for_clause_edit)
 
         self._in_clause_edit = QLineEdit("in=")
         self._in_clause_edit.textChanged.connect(self._on_query_field_changed)
@@ -224,21 +225,21 @@ class ProfileQueryPage(QWizardPage):
         self._geo_btn = QPushButton("🌎 Select Geography")
         self._geo_btn.clicked.connect(self._on_select_geography)
         in_clause_layout.addWidget(self._geo_btn)
-        self._add_field(query_grid, 3, 0, "IN Clause:", in_clause_layout)
+        add_form_field(query_grid, 3, 0, "IN Clause:", in_clause_layout)
 
         self._dataset_id_edit = QLineEdit()
-        self._add_field(query_grid, 2, 1, "Dataset Unique ID:", self._dataset_id_edit)
+        add_form_field(query_grid, 2, 1, "Dataset Unique ID:", self._dataset_id_edit)
 
         self._out_dataset_edit = QLineEdit("work.sf1_response")
-        self._add_field(query_grid, 3, 1, "Output Dataset:", self._out_dataset_edit)
+        add_form_field(query_grid, 3, 1, "Output Dataset:", self._out_dataset_edit)
 
         self._api_key_ref_edit = QLineEdit("&g_apiKey")
-        self._add_field(query_grid, 4, 0, "API Key Reference:", self._api_key_ref_edit)
+        add_form_field(query_grid, 4, 0, "API Key Reference:", self._api_key_ref_edit)
 
         self._max_var_count_spin = QSpinBox()
         self._max_var_count_spin.setRange(5, 50)
         self._max_var_count_spin.setValue(50)
-        self._add_field(
+        add_form_field(
             query_grid, 4, 1, "Max Variables per Chunk:", self._max_var_count_spin
         )
 
@@ -285,27 +286,6 @@ class ProfileQueryPage(QWizardPage):
 
         # Set initial splitter sizes (top: profile, bottom: query)
         main_splitter.setSizes([700, 700])
-
-    @staticmethod
-    def _make_form_grid() -> QGridLayout:
-        """Grid with two label/field column pairs (label, field, label, field)."""
-        grid = QGridLayout()
-        grid.setColumnStretch(1, 1)
-        grid.setColumnStretch(3, 1)
-        grid.setHorizontalSpacing(10)
-        return grid
-
-    @staticmethod
-    def _add_field(
-        grid: QGridLayout, row: int, col: int, label: str, field, span: int = 1
-    ) -> None:
-        """Place label + field in column pair `col` (0 or 1); span=2 uses the full row."""
-        grid.addWidget(QLabel(label), row, col * 2, Qt.AlignmentFlag.AlignTop)
-        cols = 3 if span == 2 else 1
-        if isinstance(field, QWidget):
-            grid.addWidget(field, row, col * 2 + 1, 1, cols)
-        else:
-            grid.addLayout(field, row, col * 2 + 1, 1, cols)
 
     def initializePage(self) -> None:
         super().initializePage()

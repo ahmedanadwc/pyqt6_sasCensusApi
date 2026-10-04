@@ -1,12 +1,12 @@
 """Catalog page for the SAS Census wizard."""
 
+from numbers import Integral, Real
 from typing import Optional
 from PyQt6.QtCore import pyqtSlot
 from PyQt6.QtWidgets import (
     QWizardPage,
     QVBoxLayout,
     QHBoxLayout,
-    QFormLayout,
     QLineEdit,
     QPushButton,
     QLabel,
@@ -14,12 +14,17 @@ from PyQt6.QtWidgets import (
     QGroupBox,
     QProgressBar,
     QTextEdit,
+    QScrollArea,
+    QFrame,
+    QWidget,
 )
 
 from pyqt6_sas_census.ui.widgets import (
     SasLogWidget,
-    CodePreviewWidget,
+    CollapsibleCodeWidget,
     DataFrameWidget,
+    add_form_field,
+    make_form_grid,
     status_label,
 )
 from pyqt6_sas_census.services.workers import SasWorker
@@ -29,17 +34,17 @@ from pyqt6_sas_census.state import WizardState
 from pyqt6_sas_census import config as cfg
 
 
-# Preview columns from the source implementation
+# Preview columns from the source implementation (matches KEEP option in ds_opts)
 CATALOG_PREVIEW_COLUMNS = [
-    "row_id",
+    "_rowid_",
     "ds_unique_id",
-    "c_title",
+    "baseurl",
     "c_vintage",
-    "c_dataset",
-    "c_variablesLink",
-    "c_geographyLink",
-    "c_isCube",
-    "accessURL",
+    "title",
+    "description",
+    "modified",
+    "Spatial",
+    "microdata_i",
 ]
 
 
@@ -58,34 +63,37 @@ class CatalogPage(QWizardPage):
         self._refresh_code_preview()
 
     def _setup_ui(self) -> None:
-        layout = QVBoxLayout(self)
+        # Scroll area keeps the page's minimum size small so the wizard never
+        # grows taller than the display; content scrolls instead.
+        page_layout = QVBoxLayout(self)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        content = QWidget()
+        content.setMinimumHeight(1100)
+        layout = QVBoxLayout(content)
+        scroll.setWidget(content)
+        page_layout.addWidget(scroll)
 
-        # Two-column layout
-        two_col_layout = QHBoxLayout()
-        two_col_layout.setSpacing(15)
-
-        # --- Left Column: Catalog Inputs ---
+        # --- Catalog inputs: full-width form, fields in two columns ---
         input_group = QGroupBox("Catalog Parameters")
-        input_group.setFixedSize(500, 200)  # Set a fixed size for the connection group
-
         input_layout = QVBoxLayout(input_group)
-
-        form = QFormLayout()
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        grid = make_form_grid()
 
         self._out_lib_edit = QLineEdit(cfg.DEFAULT_OUT_LIB)
-        form.addRow("Output Library:", self._out_lib_edit)
+        add_form_field(grid, 0, 0, "Output Library:", self._out_lib_edit)
 
         self._out_ds_edit = QLineEdit(cfg.DEFAULT_OUT_DS)
-        form.addRow("Output Dataset:", self._out_ds_edit)
+        add_form_field(grid, 0, 1, "Output Dataset:", self._out_ds_edit)
 
         self._data_json_url_edit = QLineEdit(cfg.DEFAULT_DATA_JSON_URL)
-        form.addRow("Catalog URL:", self._data_json_url_edit)
+        add_form_field(grid, 1, 0, "Catalog URL:", self._data_json_url_edit)
 
         self._report_path_edit = QLineEdit("&g_outputRoot")
-        form.addRow("Report Path:", self._report_path_edit)
+        add_form_field(grid, 1, 1, "Report Path:", self._report_path_edit)
 
-        input_layout.addLayout(form)
+        input_layout.addLayout(grid)
 
         # Run button
         btn_layout = QHBoxLayout()
@@ -95,21 +103,7 @@ class CatalogPage(QWizardPage):
         btn_layout.addWidget(self._run_btn)
         input_layout.addLayout(btn_layout)
 
-        two_col_layout.addWidget(input_group, 1)
-
-        # --- Right Column: Generated SAS Code ---
-        code_group = QGroupBox("Generated SAS Code")
-        code_group.setFixedSize(500, 200)  # Set a fixed size for the connection group
-
-        code_layout = QVBoxLayout(code_group)
-
-        self._code_preview = CodePreviewWidget()
-        self._code_preview.setFixedSize(480, 150)
-        code_layout.addWidget(self._code_preview)
-
-        two_col_layout.addWidget(code_group, 1)
-
-        layout.addLayout(two_col_layout)
+        layout.addWidget(input_group)
 
         # Progress bar (indeterminate)
         self._progress = QProgressBar()
@@ -127,71 +121,66 @@ class CatalogPage(QWizardPage):
         self._log = SasLogWidget()
         layout.addWidget(self._log)
 
+        # Generated SAS code - collapsible, below the log
+        self._code_preview = CollapsibleCodeWidget(
+            title="Generated SAS Code", expanded=False
+        )
+        layout.addWidget(self._code_preview)
+
         # Dataframe preview
         self._df_widget = DataFrameWidget(auto_resize_columns=True)
+        self._df_widget.setMinimumHeight(250)
         self._df_widget.row_selected.connect(self._on_row_selected)
         layout.addWidget(QLabel("Catalog Preview:"))
         layout.addWidget(self._df_widget, 1)
 
         # Selected row details - two-column readonly layout
         details_group = QGroupBox("Selected Row Details")
-        details_layout = QHBoxLayout(details_group)
-        details_layout.setSpacing(15)
-
-        # Left column: identity fields
-        left_form = QFormLayout()
-        left_form.setFieldGrowthPolicy(
-            QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow
-        )
+        details_layout = QVBoxLayout(details_group)
+        details_grid = make_form_grid()
 
         self._detail_title = QLineEdit()
-        self._detail_title.setReadOnly(True)
         self._detail_title.setPlaceholderText("Select a row in the table above")
-        left_form.addRow("Title:", self._detail_title)
-
         self._detail_vintage = QLineEdit()
-        self._detail_vintage.setReadOnly(True)
-        left_form.addRow("Vintage:", self._detail_vintage)
-
         self._detail_ds_id = QLineEdit()
-        self._detail_ds_id.setReadOnly(True)
-        left_form.addRow("Dataset Unique ID:", self._detail_ds_id)
-
         self._detail_row_id = QLineEdit()
-        self._detail_row_id.setReadOnly(True)
-        left_form.addRow("Row ID:", self._detail_row_id)
-
-        details_layout.addLayout(left_form, 1)
-
-        # Right column: location/meta fields + wrapping description
-        right_form = QFormLayout()
-        right_form.setFieldGrowthPolicy(
-            QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow
-        )
-
         self._detail_baseurl = QLineEdit()
-        self._detail_baseurl.setReadOnly(True)
-        right_form.addRow("Base URL:", self._detail_baseurl)
-
         self._detail_modified = QLineEdit()
-        self._detail_modified.setReadOnly(True)
-        right_form.addRow("Modified:", self._detail_modified)
-
         self._detail_spatial = QLineEdit()
-        self._detail_spatial.setReadOnly(True)
-        right_form.addRow("Spatial:", self._detail_spatial)
+        for edit in (
+            self._detail_title,
+            self._detail_vintage,
+            self._detail_ds_id,
+            self._detail_row_id,
+            self._detail_baseurl,
+            self._detail_modified,
+            self._detail_spatial,
+        ):
+            edit.setReadOnly(True)
 
+        # Left column: identity fields
+        add_form_field(details_grid, 0, 0, "Title:", self._detail_title)
+        add_form_field(details_grid, 1, 0, "Vintage:", self._detail_vintage)
+        add_form_field(details_grid, 2, 0, "Dataset Unique ID:", self._detail_ds_id)
+        add_form_field(details_grid, 3, 0, "Row ID:", self._detail_row_id)
+        # Right column: location/meta fields
+        add_form_field(details_grid, 0, 1, "Base URL:", self._detail_baseurl)
+        add_form_field(details_grid, 1, 1, "Modified:", self._detail_modified)
+        add_form_field(details_grid, 2, 1, "Spatial:", self._detail_spatial)
+
+        # Description spans the full width and gets extra height
         self._detail_description = QTextEdit()
         self._detail_description.setReadOnly(True)
         self._detail_description.setPlaceholderText(
             "Description of the selected dataset"
         )
         self._detail_description.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
-        self._detail_description.setFixedHeight(70)
-        right_form.addRow("Description:", self._detail_description)
+        self._detail_description.setMinimumHeight(160)
+        add_form_field(
+            details_grid, 4, 0, "Description:", self._detail_description, span=2
+        )
 
-        details_layout.addLayout(right_form, 1)
-
+        details_layout.addLayout(details_grid)
         layout.addWidget(details_group)
 
     def _refresh_code_preview(self) -> None:
@@ -241,7 +230,9 @@ class CatalogPage(QWizardPage):
         self._run_btn.setEnabled(True)
         self._log.set_log(result.log)
         status_label(
-            self._status_label, result.success, "Success" if result.success else "Failed"
+            self._status_label,
+            result.success,
+            "Success" if result.success else "Failed",
         )
 
         if result.success:
@@ -307,13 +298,26 @@ class CatalogPage(QWizardPage):
                 self._clear_details()
 
     @staticmethod
+    def _format_value(value) -> str:
+        """Stringify a value; whole-number floats (3.0) are shown as integers (3)."""
+        if (
+            isinstance(value, Real)
+            and not isinstance(value, (Integral, bool))
+            and value == value  # not NaN
+            and value not in (float("inf"), float("-inf"))
+            and float(value).is_integer()
+        ):
+            return str(int(value))
+        return str(value)
+
+    @staticmethod
     def _row_value(row: dict, *candidates: str) -> str:
         """Return the first matching value, case-insensitively, as a string."""
         lowered = {str(k).lower(): v for k, v in row.items()}
         for key in candidates:
             value = lowered.get(key.lower())
             if value is not None and str(value) != "nan":
-                return str(value)
+                return CatalogPage._format_value(value)
         return ""
 
     def _populate_details(self, row: dict) -> None:
@@ -353,10 +357,14 @@ class CatalogPage(QWizardPage):
     def _on_row_selected(self, row: dict) -> None:
         self._state.selected_catalog_row = row
         self._state.selected_catalog_index = row.get("_ROWID_", row.get("_rowid_"))
-        self._state.selected_row_id = str(
+        self._state.selected_row_id = self._format_value(
             row.get("_ROWID_", row.get("_rowid_", row.get("row_id", "")))
         )
         self._state.dataset_unique_id = row.get("ds_unique_id", row.get("DS_UNIQUE_ID"))
+        # Also save BaseURL for auto-populating query builder
+        self._state.step3_selected_endpoint = row.get(
+            "baseurl", row.get("BASEURL", row.get("BaseURL", row.get("baseurl", "")))
+        )
         self._populate_details(row)
         self.completeChanged.emit()
 
