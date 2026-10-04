@@ -11,16 +11,38 @@ def test_initial_state_has_configuration_defaults_and_only_connection_unlocked()
     assert state.sas_connected is False
     assert state.environment_ready is False
     assert state.step2_result is None
-    assert state.step4_selected_endpoint == ""
-    assert state.endpoint_selected is False
+    assert state.step3_selected_endpoint == ""
+    assert state.step3_endpoint_selected is False
     assert highest_unlocked_step(state) == 0
     assert {field.name for field in fields(state)} >= {
-        "sas_config_file", "sas_config_name", "sas_connected", "sas_status_message",
-        "project_root", "api_key", "environment_ready", "environment_result",
-        "step2_inputs", "step2_result", "step2_dataframe", "step2_lib", "step2_dataset",
-        "selected_catalog_row", "selected_catalog_index", "selected_row_id", "dataset_unique_id",
-        "step3_inputs", "step3_result", "step4_search_query", "step4_year", "step4_results",
-        "step4_selected_endpoint", "endpoint_selected", "step5_inputs", "step5_result", "step5_dataframe",
+        "sas_config_file",
+        "sas_config_name",
+        "sas_connected",
+        "sas_status_message",
+        "project_root",
+        "api_key",
+        "environment_ready",
+        "environment_result",
+        "step2_inputs",
+        "step2_result",
+        "step2_dataframe",
+        "step2_lib",
+        "step2_dataset",
+        "selected_catalog_row",
+        "selected_catalog_index",
+        "selected_row_id",
+        "dataset_unique_id",
+        "step3_profile_inputs",
+        "step3_profile_result",
+        "step3_query_inputs",
+        "step3_query_result",
+        "step3_query_dataframe",
+        "step3_search_query",
+        "step3_search_year",
+        "step3_search_results",
+        "step3_selected_endpoint",
+        "step3_endpoint_selected",
+        "step3_query_fields",
     }
 
 
@@ -40,17 +62,14 @@ def test_sequential_unlock_requires_connection_environment_and_successful_result
     assert highest_unlocked_step(state) == 2
 
     state.step2_result = {"success": True}
+    # Step 3 is always unlocked once step 2 has data
     assert highest_unlocked_step(state) == 2
-
-    state.step3_result = {"success": True}
-    assert highest_unlocked_step(state) == 3
-
-    state.endpoint_selected = True
-    assert highest_unlocked_step(state) == 4
 
 
 def test_failed_or_malformed_results_do_not_unlock_next_step():
-    state = WizardState(sas_connected=True, environment_ready=True, step2_result={"success": False})
+    state = WizardState(
+        sas_connected=True, environment_ready=True, step2_result={"success": False}
+    )
     assert highest_unlocked_step(state) == 1
 
     state.step2_result = None
@@ -65,22 +84,40 @@ def test_failed_or_malformed_results_do_not_unlock_next_step():
     assert highest_unlocked_step(state) == 2
 
     state.step2_result = {"success": True}
-    state.step3_result = {"success": False}
-    state.endpoint_selected = True
+    state.step3_profile_result = {"success": False}
+    state.step3_endpoint_selected = True
     assert highest_unlocked_step(state) == 2
 
 
 def test_disconnect_reset_clears_active_connection_and_dependent_state():
     state = WizardState(
-        sas_config_file="C:/sasv9.cfg", sas_config_name="SASApp", sas_connected=True,
-        sas_status_message="Connected", project_root="C:/project", api_key="secret",
-        environment_ready=True, environment_result={"success": True}, step2_inputs={"out": "catalog"},
-        step2_result={"success": True}, step2_dataframe="frame", step2_lib="CUSTOM_LIB",
-        step2_dataset="CUSTOM_DATASET", selected_catalog_row={"id": "row"}, selected_catalog_index=3,
-        selected_row_id="row", dataset_unique_id="dataset", step3_inputs={"id": "dataset"},
-        step3_result={"success": True}, step4_search_query="population", step4_year=2020,
-        step4_results=["endpoint"], step4_selected_endpoint="https://example.test", endpoint_selected=True,
-        step5_inputs={"query": "NAME"}, step5_result={"success": True}, step5_dataframe="query-frame",
+        sas_config_file="C:/sasv9.cfg",
+        sas_config_name="SASApp",
+        sas_connected=True,
+        sas_status_message="Connected",
+        project_root="C:/project",
+        api_key="secret",
+        environment_ready=True,
+        environment_result={"success": True},
+        step2_inputs={"out": "catalog"},
+        step2_result={"success": True},
+        step2_dataframe="frame",
+        step2_lib="CUSTOM_LIB",
+        step2_dataset="CUSTOM_DATASET",
+        selected_catalog_row={"id": "row"},
+        selected_catalog_index=3,
+        selected_row_id="row",
+        dataset_unique_id="dataset",
+        step3_profile_inputs={"id": "dataset"},
+        step3_profile_result={"success": True},
+        step3_search_query="population",
+        step3_search_year=2020,
+        step3_search_results=["endpoint"],
+        step3_selected_endpoint="https://example.test",
+        step3_endpoint_selected=True,
+        step3_query_inputs={"query": "NAME"},
+        step3_query_result={"success": True},
+        step3_query_dataframe="query-frame",
     )
 
     returned = state.reset_after_disconnect()
@@ -99,16 +136,17 @@ def test_disconnect_reset_clears_active_connection_and_dependent_state():
     assert state.selected_catalog_index is None
     assert state.selected_row_id is None
     assert state.dataset_unique_id is None
-    assert state.step3_inputs is None
-    assert state.step3_result is None
-    assert state.step4_search_query == ""
-    assert state.step4_year is None
-    assert state.step4_results is None
-    assert state.step4_selected_endpoint == ""
-    assert state.endpoint_selected is False
-    assert state.step5_inputs is None
-    assert state.step5_result is None
-    assert state.step5_dataframe is None
+    assert state.step3_profile_inputs is None
+    assert state.step3_profile_result is None
+    assert state.step3_query_inputs is None
+    assert state.step3_query_result is None
+    assert state.step3_query_dataframe is None
+    assert state.step3_search_query == ""
+    assert state.step3_search_year is None
+    assert state.step3_search_results is None
+    assert state.step3_selected_endpoint == ""
+    assert state.step3_endpoint_selected is False
+    assert state.step3_query_fields == {}
     assert state.project_root == "C:/project"
     assert state.api_key == "secret"
     assert state.sas_config_file == "C:/sasv9.cfg"

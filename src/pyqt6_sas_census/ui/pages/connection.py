@@ -3,7 +3,7 @@
 import ast
 from pathlib import Path
 from typing import Optional
-from PyQt6.QtCore import QThread, pyqtSlot
+from PyQt6.QtCore import QThread, pyqtSlot, Qt
 from PyQt6.QtWidgets import (
     QWizardPage,
     QVBoxLayout,
@@ -55,8 +55,26 @@ class ConnectionPage(QWizardPage):
         conn_group.setFixedSize(500, 150)  # Set a fixed size for the connection group
         conn_layout = QVBoxLayout(conn_group)
 
+        # Connection status badge (like Streamlit)
+        self._connection_badge = QLabel("⚪ SAS Disconnected")
+        self._connection_badge.setStyleSheet("""
+            QLabel {
+                background-color: #f1f5f9;
+                color: #475569;
+                padding: 4px 12px;
+                border-radius: 14px;
+                font-weight: 600;
+                font-size: 13px;
+                border: 1px solid #cbd5e1;
+            }
+        """)
+        self._connection_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        conn_layout.addWidget(self._connection_badge)
+
         conn_form = QFormLayout()
-        conn_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        conn_form.setFieldGrowthPolicy(
+            QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow
+        )
 
         # Config file
         self._cfgfile_edit = QLineEdit(cfg.DEFAULT_SAS_CFGFILE)
@@ -254,7 +272,9 @@ class ConnectionPage(QWizardPage):
         self._connect_btn.setEnabled(True)
         self._log.set_log(result.log)
         status_label(
-            self._status_label, result.success, "Success" if result.success else "Failed"
+            self._status_label,
+            result.success,
+            "Success" if result.success else "Failed",
         )
         self._update_state_from_result(result)
         # Update buttons AFTER state is updated
@@ -277,9 +297,13 @@ class ConnectionPage(QWizardPage):
             self._state.sas_config_file = self._cfgfile_edit.text().strip()
             self._state.sas_config_name = self._cfgname_combo.currentText().strip()
             self._state.sas_status_message = result.log
+            self._update_connection_badge(
+                True, self._cfgname_combo.currentText().strip()
+            )
             self.completeChanged.emit()
         elif "SAS session ended" in result.log:
             self._state.reset_after_disconnect()
+            self._update_connection_badge(False, "")
             self.completeChanged.emit()
         elif "setup" in result.log.lower() or "initialization" in result.log.lower():
             if result.success:
@@ -289,6 +313,35 @@ class ConnectionPage(QWizardPage):
                 self._state.api_key = self._api_key_edit.text().strip()
                 self._state.sas_status_message = "Environment initialized"
                 self.completeChanged.emit()
+
+    def _update_connection_badge(self, connected: bool, config_name: str = "") -> None:
+        """Update the connection status badge."""
+        if connected:
+            self._connection_badge.setText(f"🟢 Connected to SAS ({config_name})")
+            self._connection_badge.setStyleSheet("""
+                QLabel {
+                    background-color: #dcfce7;
+                    color: #166534;
+                    padding: 4px 12px;
+                    border-radius: 14px;
+                    font-weight: 600;
+                    font-size: 13px;
+                    border: 1px solid #86efac;
+                }
+            """)
+        else:
+            self._connection_badge.setText("⚪ SAS Disconnected")
+            self._connection_badge.setStyleSheet("""
+                QLabel {
+                    background-color: #f1f5f9;
+                    color: #475569;
+                    padding: 4px 12px;
+                    border-radius: 14px;
+                    font-weight: 600;
+                    font-size: 13px;
+                    border: 1px solid #cbd5e1;
+                }
+            """)
 
     def isComplete(self) -> bool:
         return self._state.sas_connected and self._state.environment_ready

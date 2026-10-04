@@ -1,6 +1,6 @@
 """Qt worker for non-blocking SAS operations."""
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
 
 
 class SasWorker(QObject):
@@ -15,6 +15,7 @@ class SasWorker(QObject):
         self._args = args
         self._kwargs = kwargs
 
+    @pyqtSlot()
     def run(self) -> None:
         try:
             result = self._callable(*self._args, **self._kwargs)

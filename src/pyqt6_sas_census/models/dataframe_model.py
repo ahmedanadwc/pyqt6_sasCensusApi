@@ -25,6 +25,14 @@ class DataFrameModel(QAbstractTableModel):
             value = self._dataframe.iloc[index.row(), index.column()]
             if pd.isna(value):
                 return ""
+            # Format numeric values: show integers without decimal point
+            if isinstance(value, (int,)):
+                return str(value)
+            if isinstance(value, float):
+                # Show as integer if it's a whole number
+                if value == int(value):
+                    return str(int(value))
+                return str(value)
             return str(value)
         return None
 

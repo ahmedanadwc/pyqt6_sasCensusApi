@@ -9,7 +9,13 @@ _DEFAULT_STATUS = "⚪ SAS Disconnected (Preview & Code Export mode)"
 
 @dataclass
 class WizardState:
-    """Shared state for the five-step SAS Census wizard."""
+    """Shared state for the three-step SAS Census wizard.
+
+    Steps:
+    1. SAS Session - Connect to SAS and initialize environment
+    2. Collect All Datasets - Run %censusapi_getAllDataSets
+    3. Dataset Profile & Query Builder - Run %censusapi_getDsFullInfo and %censusapi_submitDataApiQuery
+    """
 
     sas_config_file: str = ""
     sas_config_name: str = ""
@@ -20,29 +26,36 @@ class WizardState:
     environment_ready: bool = False
     environment_result: object | None = None
 
+    # Step 2: Collect Catalog
     step2_inputs: object | None = None
     step2_result: object | None = None
     step2_dataframe: Any | None = None
     step2_lib: str = "APILIB"
     step2_dataset: str = "_API_ALL_DATA"
 
+    # Selected catalog row (shared between steps 2 and 3)
     selected_catalog_row: object | None = None
     selected_catalog_index: int | None = None
     selected_row_id: str | None = None
     dataset_unique_id: str | None = None
 
-    step3_inputs: object | None = None
-    step3_result: object | None = None
+    # Step 3: Profile & Query
+    step3_profile_inputs: object | None = None
+    step3_profile_result: object | None = None
+    step3_query_inputs: object | None = None
+    step3_query_result: object | None = None
+    step3_query_dataframe: Any | None = None
+    step3_search_query: str = ""
+    step3_search_year: int | None = None
+    step3_search_results: Any | None = None
+    step3_selected_endpoint: str = ""
+    step3_endpoint_selected: bool = False
+    # Per-dataset query fields keyed by ds_unique_id
+    step3_query_fields: dict[str, dict[str, str]] = None
 
-    step4_search_query: str = "sf1"
-    step4_year: int | None = None
-    step4_results: Any | None = None
-    step4_selected_endpoint: str = ""
-    endpoint_selected: bool = False
-
-    step5_inputs: object | None = None
-    step5_result: object | None = None
-    step5_dataframe: Any | None = None
+    def __post_init__(self):
+        if self.step3_query_fields is None:
+            self.step3_query_fields = {}
 
     def reset_after_disconnect(self) -> "WizardState":
         """Clear the active session and all state that depends on it."""
@@ -61,18 +74,17 @@ class WizardState:
         self.selected_row_id = None
         self.dataset_unique_id = None
 
-        self.step3_inputs = None
-        self.step3_result = None
-
-        self.step4_search_query = ""
-        self.step4_year = None
-        self.step4_results = None
-        self.step4_selected_endpoint = ""
-        self.endpoint_selected = False
-
-        self.step5_inputs = None
-        self.step5_result = None
-        self.step5_dataframe = None
+        self.step3_profile_inputs = None
+        self.step3_profile_result = None
+        self.step3_query_inputs = None
+        self.step3_query_result = None
+        self.step3_query_dataframe = None
+        self.step3_search_query = ""
+        self.step3_search_year = None
+        self.step3_search_results = None
+        self.step3_selected_endpoint = ""
+        self.step3_endpoint_selected = False
+        self.step3_query_fields = {}
         return self
 
 
@@ -82,18 +94,12 @@ def result_succeeded(result: object) -> bool:
 
 
 def highest_unlocked_step(state: WizardState) -> int:
-    """Return the highest zero-based wizard step currently available."""
+    """Return the highest zero-based wizard step currently available (0, 1, or 2)."""
     if not state.sas_connected or not state.environment_ready:
         return 0
     # Step 2 is unlocked if the SAS run succeeded OR a cached
     # / pre-existing dataframe is available (no re-run required).
-    if not (
-        result_succeeded(state.step2_result)
-        or state.step2_dataframe is not None
-    ):
+    if not (result_succeeded(state.step2_result) or state.step2_dataframe is not None):
         return 1
-    if not result_succeeded(state.step3_result):
-        return 2
-    if not state.endpoint_selected:
-        return 3
-    return 4
+    # Step 3 is always unlocked once step 2 has data
+    return 2

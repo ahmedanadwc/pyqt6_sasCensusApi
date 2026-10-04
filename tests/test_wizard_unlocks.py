@@ -9,15 +9,15 @@ def test_failed_results_do_not_unlock_next_pages():
     assert highest_unlocked_step(state) == 1
 
 
-def test_endpoint_selection_unlocks_query():
+def test_step3_always_unlocked_after_step2_succeeds():
     state = WizardState(
         sas_connected=True,
         environment_ready=True,
         step2_result={"success": True},
-        step3_result={"success": True},
-        endpoint_selected=True,
+        step3_profile_result={"success": True},
     )
-    assert highest_unlocked_step(state) == 4
+    # Step 3 is always unlocked once step 2 has data
+    assert highest_unlocked_step(state) == 2
 
 
 def test_result_succeeded_edge_cases():

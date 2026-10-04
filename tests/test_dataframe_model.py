@@ -16,7 +16,8 @@ def test_dataframe_model_exposes_shape_and_values(qtbot):
 def test_dataframe_model_handles_nulls(qtbot):
     model = DataFrameModel(pd.DataFrame({"a": [1, None], "b": [None, "x"]}))
     assert model.rowCount() == 2
-    assert model.data(model.index(0, 0)) == "1.0"
+    # Float 1.0 displayed as integer "1" since it's a whole number
+    assert model.data(model.index(0, 0)) == "1"
     assert model.data(model.index(1, 0)) == ""
     assert model.data(model.index(0, 1)) == ""
     assert model.data(model.index(1, 1)) == "x"

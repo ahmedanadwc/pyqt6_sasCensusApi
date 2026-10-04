@@ -6,10 +6,14 @@ for paths and defaults so the PyQt6 app does not depend on the
 standalone source package for SAS session management.
 """
 
+import hashlib
+import json
 import logging
 import re
-from typing import Any, Optional
+from pathlib import Path
+from typing import Any, Optional, Tuple, Dict
 
+import duckdb
 import pandas as pd
 
 from pyqt6_sas_census.config import (
@@ -19,6 +23,28 @@ from pyqt6_sas_census.config import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Cache directory for Parquet files
+DF_CACHE_DIR = Path.home() / ".cache" / "pyqt6_sas_census" / "dataframes"
+
+
+def _read_parquet(path: Path) -> pd.DataFrame:
+    """Read a parquet file into a DataFrame using DuckDB."""
+    with duckdb.connect() as con:
+        return con.execute("SELECT * FROM read_parquet(?)", [str(path)]).df()
+
+
+def _write_parquet(df: pd.DataFrame, path: Path) -> None:
+    """Write a DataFrame to parquet using DuckDB (temp file, then atomic replace)."""
+    tmp = path.with_suffix(".tmp")
+    target = str(tmp).replace("'", "''")
+    try:
+        with duckdb.connect() as con:
+            con.register("cache_df", df)
+            con.execute(f"COPY cache_df TO '{target}' (FORMAT parquet)")
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 class SASBackend:
@@ -32,6 +58,7 @@ class SASBackend:
         self._sas: Optional[Any] = None
         self._cfgname: Optional[str] = cfgname
         self._cfgfile: Optional[str] = cfgfile if cfgfile else None
+        self._df_cache: Dict[str, pd.DataFrame] = {}
 
     @property
     def is_connected(self) -> bool:
@@ -52,26 +79,25 @@ class SASBackend:
             self._cfgfile = cfgfile.strip() if cfgfile.strip() else None
 
         try:
-            # pyrefly: ignore [missing-import]
             import saspy
-
-            kwargs: Dict[str, Any] = {}
-            if self._cfgname:
-                kwargs["cfgname"] = self._cfgname
-            if self._cfgfile:
-                kwargs["cfgfile"] = self._cfgfile
-
-            logger.info(f"Initializing SASsession with kwargs: {kwargs}")
-            self._sas = saspy.SASsession(**kwargs)
-
-            info_str = f"cfgname='{self._cfgname}'"
-            if self._cfgfile:
-                info_str += f", cfgfile='{self._cfgfile}'"
-            return True, f"Successfully connected to SAS ({info_str})."
-        except Exception as exc:
+        except ImportError:
             self._sas = None
-            logger.exception("Failed to connect to SAS: %s", exc)
-            return False, f"Failed to connect to SAS: {exc}"
+            logger.warning("saspy package is not installed; SAS backend disabled.")
+            return False, "saspy not installed"
+
+        kwargs: Dict[str, Any] = {}
+        if self._cfgname:
+            kwargs["cfgname"] = self._cfgname
+        if self._cfgfile:
+            kwargs["cfgfile"] = self._cfgfile
+
+        logger.info(f"Initializing SASsession with kwargs: {kwargs}")
+        self._sas = saspy.SASsession(**kwargs)
+
+        info_str = f"cfgname='{self._cfgname}'"
+        if self._cfgfile:
+            info_str += f", cfgfile='{self._cfgfile}'"
+        return True, f"Successfully connected to SAS ({info_str})."
 
     def disconnect(self) -> str:
         """Disconnect the active SAS session."""
@@ -86,6 +112,35 @@ class SASBackend:
             return "SAS session ended."
         return "No active SAS session."
 
+    def clear_cache(self, disk: bool = False) -> None:
+        """Drop cached DataFrames (memory always, parquet files when disk=True)."""
+        self._df_cache.clear()
+        if disk and DF_CACHE_DIR.exists():
+            for f in DF_CACHE_DIR.glob("*.parquet"):
+                f.unlink(missing_ok=True)
+
+    def _table_stamp(self, table_name: str, libref: str) -> Optional[str]:
+        """Cheap freshness token (modate|nobs) read from SAS; None if unavailable."""
+        if self._sas is None:
+            return None
+        try:
+            lib, tbl = (
+                libref.upper().replace("'", ""),
+                table_name.upper().replace("'", ""),
+            )
+            self._sas.submit(
+                "proc sql noprint; select put(modate, 20.6), put(nobs, 20.) "
+                "into :_pyc_mod trimmed, :_pyc_nobs trimmed from dictionary.tables "
+                f"where libname='{lib}' and memname='{tbl}' and memtype='DATA'; quit;"
+            )
+            mod, nobs = self._sas.symget("_pyc_mod"), self._sas.symget("_pyc_nobs")
+            return f"{mod}|{nobs}" if mod not in ("", None) else None
+        except Exception as exc:
+            logger.warning(
+                "Could not read freshness stamp for %s.%s: %s", libref, table_name, exc
+            )
+            return None
+
     def run_environment_setup(
         self,
         proj_root: str = str(SAS_PROJECT_ROOT),
@@ -98,7 +153,10 @@ class SASBackend:
         # Normalize slashes for SAS
         clean_root = proj_root.replace("\\", "/")
         macro_paths = ", ".join(
-            [f'"{clean_root}/code/macros/{sub}"' for sub in ["censusapi", "etl", "util"]]
+            [
+                f'"{clean_root}/code/macros/{sub}"'
+                for sub in ["censusapi", "etl", "util"]
+            ]
         )
         data_path = f"{clean_root}/data"
         out_path = f"{clean_root}/output"
@@ -165,14 +223,37 @@ options fmtsearch=(WORK apilib);
         table_name: str,
         libref: str = "WORK",
         ds_opts: Optional[Dict[str, Any]] = None,
+        force_refresh: bool = False,
     ) -> Optional[pd.DataFrame]:
-        """Retrieve a SAS table into a pandas DataFrame using saspy."""
+        """Retrieve a SAS table into a pandas DataFrame, cached by table, options and modify-time."""
         if not self.is_connected or self._sas is None:
             return None
+
+        stamp = None if force_refresh else self._table_stamp(table_name, libref)
+        key = None
+        if stamp:
+            raw = json.dumps(
+                [libref.upper(), table_name.upper(), ds_opts, stamp],
+                sort_keys=True,
+                default=str,
+            )
+            key = hashlib.sha1(raw.encode("utf-8")).hexdigest()
+            if key in self._df_cache:
+                return self._df_cache[key].copy()
+            parquet = DF_CACHE_DIR / f"{key}.parquet"
+            if parquet.exists():
+                try:
+                    df = _read_parquet(parquet)
+                    self._df_cache[key] = df
+                    return df.copy()
+                except Exception as exc:
+                    logger.warning(
+                        "Ignoring unreadable cache file %s: %s", parquet, exc
+                    )
+
         try:
             sas_data = self._sas.sasdata(table_name, libref, dsopts=ds_opts)
             df = sas_data.to_df()
-            return df
         except Exception as exc:
             logger.warning(
                 "Could not convert SAS table %s.%s to DataFrame: %s",
@@ -181,6 +262,61 @@ options fmtsearch=(WORK apilib);
                 exc,
             )
             return None
+
+        if key is not None and df is not None:
+            self._df_cache[key] = df
+            try:
+                DF_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                _write_parquet(df, DF_CACHE_DIR / f"{key}.parquet")
+            except Exception as exc:
+                logger.info(
+                    "Parquet cache write skipped for %s.%s: %s", libref, table_name, exc
+                )
+        return df.copy() if df is not None else None
+
+    def find_step3_tables(self, ds_unique_id: str) -> Dict[str, str]:
+        """Find profile tables created by %censusapi_getDsFullInfo in APILIB.
+
+        Tables are named like <libref>_<ds_unique_id>_<suffix>, e.g. APILIB._45_CPS_1995_VARS
+        Returns dict mapping tab label -> table name.
+        """
+        if not self.is_connected or self._sas is None:
+            return {}
+
+        # Sanitize ds_unique_id the way SAS builds member names
+        uid = re.sub(r"\W", "_", str(ds_unique_id).strip()).upper()
+        if not uid:
+            return {}
+
+        # Query SASHELP.VTABLE for tables in APILIB
+        members = self.fetch_dataframe(
+            "VTABLE", "SASHELP", ds_opts={"WHERE": "(libname='APILIB')"}
+        )
+        if members is None or members.empty:
+            return {}
+
+        memname_col = next((c for c in members.columns if c.lower() == "memname"), None)
+        if memname_col is None:
+            return {}
+
+        names = [str(n).strip() for n in members[memname_col]]
+
+        # Suffixes for the 4 profile tables
+        step3_suffixes = [
+            ("Variables", "_VARS"),
+            ("Groups", "_GRPS"),
+            ("Geographies", "_GEOS"),
+            ("Sample Queries", "_EXMPLS"),
+        ]
+
+        found = {}
+        for label, suffix in step3_suffixes:
+            for name in names:
+                if name.upper().endswith(f"{uid}{suffix}"):
+                    found[label] = name
+                    break
+
+        return found
 
 
 # Global singleton instance

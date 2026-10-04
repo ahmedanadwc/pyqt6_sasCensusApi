@@ -9,19 +9,17 @@ from pyqt6_sas_census.services.source_adapter import source_modules
 from pyqt6_sas_census.ui.pages import (
     ConnectionPage,
     CatalogPage,
-    ProfilePage,
-    SearchPage,
-    QueryPage,
+    ProfileQueryPage,
 )
 
 
 class WizardWindow(QWizard):
-    """Main wizard window with five pages and unlock logic."""
+    """Main wizard window with three pages and unlock logic."""
 
     def __init__(self, state: WizardState, service: SasService, parent=None):
         super().__init__(parent)
         self.setWindowTitle("US Census SAS API Studio")
-        self.resize(1000, 700)
+        self.resize(1200, 800)
         self.setWizardStyle(QWizard.WizardStyle.ModernStyle)
 
         self._state = state
@@ -30,16 +28,12 @@ class WizardWindow(QWizard):
         # Create pages
         self._connection_page = ConnectionPage(state, service)
         self._catalog_page = CatalogPage(state, service)
-        self._profile_page = ProfilePage(state, service)
-        self._search_page = SearchPage(state, service)
-        self._query_page = QueryPage(state, service)
+        self._profile_query_page = ProfileQueryPage(state, service)
 
         # Add pages in order
         self.addPage(self._connection_page)
         self.addPage(self._catalog_page)
-        self.addPage(self._profile_page)
-        self.addPage(self._search_page)
-        self.addPage(self._query_page)
+        self.addPage(self._profile_query_page)
 
         # Connect signals
         self.currentIdChanged.connect(self._on_page_changed)
@@ -47,16 +41,20 @@ class WizardWindow(QWizard):
         # Also update navigation when any page completes
         self._connection_page.completeChanged.connect(self._update_navigation)
         self._catalog_page.completeChanged.connect(self._update_navigation)
-        self._profile_page.completeChanged.connect(self._update_navigation)
-        self._search_page.completeChanged.connect(self._update_navigation)
-        self._query_page.completeChanged.connect(self._update_navigation)
+        self._profile_query_page.completeChanged.connect(self._update_navigation)
 
         # Initial navigation update
         self._update_navigation()
 
     def _on_page_changed(self, page_id: int) -> None:
         self._update_navigation()
-        self.setWindowTitle(f"US Census SAS API Studio - Step {page_id + 1}")
+        step_names = [
+            "SAS Session",
+            "Collect All Datasets",
+            "Dataset Profile & Query Builder",
+        ]
+        if 0 <= page_id < len(step_names):
+            self.setWindowTitle(f"US Census SAS API Studio - {step_names[page_id]}")
 
     def _update_navigation(self) -> None:
         max_unlocked = highest_unlocked_step(self._state)

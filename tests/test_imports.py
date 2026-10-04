@@ -24,9 +24,7 @@ def test_application_modules_import():
     from pyqt6_sas_census.ui.pages import (
         ConnectionPage,
         CatalogPage,
-        ProfilePage,
-        SearchPage,
-        QueryPage,
+        ProfileQueryPage,
     )
 
     assert callable(main)
@@ -50,6 +48,4 @@ def test_application_modules_import():
     assert status_label is not None
     assert ConnectionPage is not None
     assert CatalogPage is not None
-    assert ProfilePage is not None
-    assert SearchPage is not None
-    assert QueryPage is not None
+    assert ProfileQueryPage is not None

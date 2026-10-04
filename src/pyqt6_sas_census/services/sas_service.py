@@ -105,7 +105,13 @@ class SasService:
 
         if result.success:
             # Fetch the catalog data
-            df = self.backend.fetch_dataframe(out_ds, out_lib, ds_opts={"KEEP": "_rowid_ ds_unique_id baseurl c_vintage title description modified Spatial microdata_i"})
+            df = self.backend.fetch_dataframe(
+                out_ds,
+                out_lib,
+                ds_opts={
+                    "KEEP": "_rowid_ ds_unique_id baseurl c_vintage title description modified Spatial microdata_i"
+                },
+            )
             if df is not None:
                 result.dataframe = df
                 result.metadata = {"lib": out_lib, "dataset": out_ds}
@@ -129,9 +135,7 @@ class SasService:
         code = build_profile_code(api_listing_lib, api_listing_ds, row_id, report_path)
         return self.submit_code(code)
 
-    def search_endpoints(
-        self, query: str, year: str | None
-    ) -> tuple[list[dict], bool]:
+    def search_endpoints(self, query: str, year: str | None) -> tuple[list[dict], bool]:
         """Search catalog. Returns (results, used_fallback)."""
         from pyqt6_sas_census.services.source_adapter import (
             search_with_fallback,
@@ -179,4 +183,22 @@ class SasService:
                 result.dataframe = df
                 result.metadata = {"lib": libref, "dataset": table_name}
 
+        return result
+
+    def fetch_profile_tables(
+        self, ds_unique_id: str
+    ) -> dict[str, tuple[str, pd.DataFrame]]:
+        """Find and fetch profile tables for a dataset unique ID.
+
+        Returns dict mapping label -> (table_name, dataframe).
+        """
+        if not self.backend.is_connected:
+            return {}
+
+        table_names = self.backend.find_step3_tables(ds_unique_id)
+        result = {}
+        for label, table_name in table_names.items():
+            df = self.backend.fetch_dataframe(table_name, "APILIB")
+            if df is not None:
+                result[label] = (table_name, df)
         return result
