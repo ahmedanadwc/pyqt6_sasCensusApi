@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QWizardPage,
     QVBoxLayout,
     QHBoxLayout,
-    QFormLayout,
+    QGridLayout,
     QLineEdit,
     QPushButton,
     QLabel,
@@ -76,7 +76,7 @@ class ProfileQueryPage(QWizardPage):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         content = QWidget()
-        content.setMinimumHeight(900)
+        content.setMinimumHeight(1400)
         layout = QVBoxLayout(content)
         layout.setContentsMargins(0, 0, 0, 0)
         scroll.setWidget(content)
@@ -89,48 +89,34 @@ class ProfileQueryPage(QWizardPage):
 
         # === TOP SECTION: Profile Inputs & Results ===
         top_widget = QWidget()
-        top_layout = QHBoxLayout()
+        top_layout = QVBoxLayout(top_widget)
         top_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Left side: Profile Parameters (two-column form matching Streamlit)
+        # Profile parameters: full-width form, fields in two columns
         profile_input_group = QGroupBox("Profile Parameters (%censusapi_getDsFullInfo)")
         profile_input_layout = QVBoxLayout(profile_input_group)
-
-        # Two-column form layout (matching Streamlit)
-        form_layout = QHBoxLayout()
-
-        # Left column
-        left_form = QFormLayout()
-        left_form.setFieldGrowthPolicy(
-            QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow
-        )
+        profile_grid = self._make_form_grid()
 
         self._api_lib_edit = QLineEdit("APILIB")
-        left_form.addRow("Catalog Library:", self._api_lib_edit)
+        self._add_field(profile_grid, 0, 0, "Catalog Library:", self._api_lib_edit)
 
         self._api_ds_edit = QLineEdit("_API_ALL_DATA")
-        left_form.addRow("Catalog Dataset:", self._api_ds_edit)
-
-        # Right column
-        right_form = QFormLayout()
-        right_form.setFieldGrowthPolicy(
-            QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow
-        )
+        self._add_field(profile_grid, 1, 0, "Catalog Dataset:", self._api_ds_edit)
 
         self._row_id_edit = QLineEdit()
         self._row_id_edit.setPlaceholderText("Row ID from catalog (e.g., 3)")
-        right_form.addRow("Row ID:", self._row_id_edit)
+        self._add_field(profile_grid, 0, 1, "Row ID:", self._row_id_edit)
 
         self._profile_report_path_edit = QLineEdit("&g_outputRoot")
-        right_form.addRow("Report Path:", self._profile_report_path_edit)
+        self._add_field(
+            profile_grid, 1, 1, "Report Path:", self._profile_report_path_edit
+        )
 
         self._reuse_profile_check = QCheckBox("Reuse Existing Profile Tables")
         self._reuse_profile_check.setChecked(True)
-        right_form.addRow("", self._reuse_profile_check)
+        profile_grid.addWidget(self._reuse_profile_check, 2, 0, 1, 4)
 
-        form_layout.addLayout(left_form, 1)
-        form_layout.addLayout(right_form, 1)
-        profile_input_layout.addLayout(form_layout)
+        profile_input_layout.addLayout(profile_grid)
 
         # Profile buttons (Submit on left, Refresh on right - matching Streamlit)
         profile_btn_layout = QHBoxLayout()
@@ -144,7 +130,7 @@ class ProfileQueryPage(QWizardPage):
         profile_btn_layout.addWidget(self._refresh_profile_btn)
         profile_input_layout.addLayout(profile_btn_layout)
 
-        # Profile progress and log
+        # Profile progress and status
         self._profile_progress = QProgressBar()
         self._profile_progress.setRange(0, 0)
         self._profile_progress.setVisible(False)
@@ -155,22 +141,22 @@ class ProfileQueryPage(QWizardPage):
         self._profile_status = QLabel("")
         profile_input_layout.addWidget(self._profile_status)
 
+        # SAS log sits below the form, above the generated code
         self._profile_log = SasLogWidget()
         self._profile_log.setMaximumHeight(150)
-        profile_input_layout.addWidget(self._profile_log)
 
-        # Right side: Generated SAS Code (Profile)
-        # Right side: Generated SAS Code (Profile) - collapsible
+        # Generated SAS Code (Profile) - collapsible
         self._profile_code_preview = CollapsibleCodeWidget(
-            title="Generated SAS Code (Profile)", expanded=True
+            title="Generated SAS Code (Profile)", expanded=False
         )
 
-        # Add both to horizontal layout
-        top_layout.addWidget(profile_input_group, 1)
-        top_layout.addWidget(self._profile_code_preview, 1)
+        top_layout.addWidget(profile_input_group)
+        top_layout.addWidget(self._profile_log)
+        top_layout.addWidget(self._profile_code_preview)
 
         # Profile results tabs (spans full width below)
         self._profile_tabs = QTabWidget()
+        self._profile_tabs.setMinimumHeight(260)  # tab bar + header + ~5 grid rows
         self._profile_tab_widgets: dict[str, DataFrameWidget] = {}
         for label, _ in PROFILE_TABLE_SUFFIXES:
             tab_widget = QWidget()
@@ -196,36 +182,26 @@ class ProfileQueryPage(QWizardPage):
             self._on_sample_query_selected
         )
 
-        # Add tabs below the side-by-side groups
-        top_layout_v = QVBoxLayout()
-        top_layout_v.setContentsMargins(0, 0, 0, 0)
-        top_layout_v.addLayout(top_layout, 1)
-        top_layout_v.addWidget(self._profile_tabs, 1)
-
-        top_widget.setLayout(top_layout_v)
+        top_layout.addWidget(self._profile_tabs, 1)
 
         # Add top widget to splitter
         main_splitter.addWidget(top_widget)
 
         # === BOTTOM SECTION: Query Builder ===
         query_widget = QWidget()
-        query_layout = QHBoxLayout()
+        query_layout = QVBoxLayout(query_widget)
         query_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Left side: Query Builder
+        # Query builder: full-width form, fields in two columns
         query_input_group = QGroupBox("Query Builder (%censusapi_submitDataApiQuery)")
         query_input_layout = QVBoxLayout(query_input_group)
-
-        query_form = QFormLayout()
-        query_form.setFieldGrowthPolicy(
-            QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow
-        )
+        query_grid = self._make_form_grid()
 
         self._endpoint_edit = QLineEdit()
         self._endpoint_edit.setPlaceholderText(
             "https://api.census.gov/data/2000/dec/sf1?"
         )
-        query_form.addRow("Endpoint:", self._endpoint_edit)
+        self._add_field(query_grid, 0, 0, "Endpoint:", self._endpoint_edit, span=2)
 
         self._get_clause_edit = QTextEdit()
         self._get_clause_edit.setPlainText("get=NAME")
@@ -234,11 +210,11 @@ class ProfileQueryPage(QWizardPage):
             "Enter variable names, one per line or comma-separated"
         )
         self._get_clause_edit.textChanged.connect(self._on_query_field_changed)
-        query_form.addRow("GET Clause:", self._get_clause_edit)
+        self._add_field(query_grid, 1, 0, "GET Clause:", self._get_clause_edit, span=2)
 
         self._for_clause_edit = QLineEdit("for=state:*")
         self._for_clause_edit.textChanged.connect(self._on_query_field_changed)
-        query_form.addRow("FOR Clause:", self._for_clause_edit)
+        self._add_field(query_grid, 2, 0, "FOR Clause:", self._for_clause_edit)
 
         self._in_clause_edit = QLineEdit("in=")
         self._in_clause_edit.textChanged.connect(self._on_query_field_changed)
@@ -248,23 +224,25 @@ class ProfileQueryPage(QWizardPage):
         self._geo_btn = QPushButton("🌎 Select Geography")
         self._geo_btn.clicked.connect(self._on_select_geography)
         in_clause_layout.addWidget(self._geo_btn)
-        query_form.addRow("IN Clause:", in_clause_layout)
+        self._add_field(query_grid, 3, 0, "IN Clause:", in_clause_layout)
 
         self._dataset_id_edit = QLineEdit()
-        query_form.addRow("Dataset Unique ID:", self._dataset_id_edit)
+        self._add_field(query_grid, 2, 1, "Dataset Unique ID:", self._dataset_id_edit)
 
         self._out_dataset_edit = QLineEdit("work.sf1_response")
-        query_form.addRow("Output Dataset:", self._out_dataset_edit)
+        self._add_field(query_grid, 3, 1, "Output Dataset:", self._out_dataset_edit)
 
         self._api_key_ref_edit = QLineEdit("&g_apiKey")
-        query_form.addRow("API Key Reference:", self._api_key_ref_edit)
+        self._add_field(query_grid, 4, 0, "API Key Reference:", self._api_key_ref_edit)
 
         self._max_var_count_spin = QSpinBox()
         self._max_var_count_spin.setRange(5, 50)
         self._max_var_count_spin.setValue(50)
-        query_form.addRow("Max Variables per Chunk:", self._max_var_count_spin)
+        self._add_field(
+            query_grid, 4, 1, "Max Variables per Chunk:", self._max_var_count_spin
+        )
 
-        query_input_layout.addLayout(query_form)
+        query_input_layout.addLayout(query_grid)
 
         # Query buttons
         query_btn_layout = QHBoxLayout()
@@ -274,7 +252,7 @@ class ProfileQueryPage(QWizardPage):
         query_btn_layout.addStretch()
         query_input_layout.addLayout(query_btn_layout)
 
-        # Query progress and log
+        # Query progress and status
         self._query_progress = QProgressBar()
         self._query_progress.setRange(0, 0)
         self._query_progress.setVisible(False)
@@ -285,35 +263,49 @@ class ProfileQueryPage(QWizardPage):
         self._query_status = QLabel("")
         query_input_layout.addWidget(self._query_status)
 
+        # SAS log sits below the form, above the generated code
         self._query_log = SasLogWidget()
         self._query_log.setMaximumHeight(150)
-        query_input_layout.addWidget(self._query_log)
 
         # Create query results widget first
         self._query_df_widget = DataFrameWidget()
 
-        # Right side: Generated SAS Code (Query) - collapsible
+        # Generated SAS Code (Query) - collapsible
         self._query_code_preview = CollapsibleCodeWidget(
             title="Generated SAS Code (Query)", expanded=True
         )
 
-        # Add both to horizontal layout
-        query_layout.addWidget(query_input_group, 1)
-        query_layout.addWidget(self._query_code_preview, 1)
-
-        # Query results (spans full width below)
-        query_layout_v = QVBoxLayout()
-        query_layout_v.setContentsMargins(0, 0, 0, 0)
-        query_layout_v.addLayout(query_layout, 1)
-        query_layout_v.addWidget(QLabel("Query Results:"))
-        query_layout_v.addWidget(self._query_df_widget)
-
-        query_widget.setLayout(query_layout_v)
+        query_layout.addWidget(query_input_group)
+        query_layout.addWidget(self._query_log)
+        query_layout.addWidget(self._query_code_preview)
+        query_layout.addWidget(QLabel("Query Results:"))
+        query_layout.addWidget(self._query_df_widget, 1)
 
         main_splitter.addWidget(query_widget)
 
         # Set initial splitter sizes (top: profile, bottom: query)
-        main_splitter.setSizes([400, 400])
+        main_splitter.setSizes([700, 700])
+
+    @staticmethod
+    def _make_form_grid() -> QGridLayout:
+        """Grid with two label/field column pairs (label, field, label, field)."""
+        grid = QGridLayout()
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(3, 1)
+        grid.setHorizontalSpacing(10)
+        return grid
+
+    @staticmethod
+    def _add_field(
+        grid: QGridLayout, row: int, col: int, label: str, field, span: int = 1
+    ) -> None:
+        """Place label + field in column pair `col` (0 or 1); span=2 uses the full row."""
+        grid.addWidget(QLabel(label), row, col * 2, Qt.AlignmentFlag.AlignTop)
+        cols = 3 if span == 2 else 1
+        if isinstance(field, QWidget):
+            grid.addWidget(field, row, col * 2 + 1, 1, cols)
+        else:
+            grid.addLayout(field, row, col * 2 + 1, 1, cols)
 
     def initializePage(self) -> None:
         super().initializePage()
