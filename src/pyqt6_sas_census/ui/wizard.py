@@ -5,7 +5,6 @@ from PyQt6.QtWidgets import QWizard, QMessageBox
 
 from pyqt6_sas_census.state import WizardState, highest_unlocked_step
 from pyqt6_sas_census.services.sas_service import SasService
-from pyqt6_sas_census.services.source_adapter import source_modules
 from pyqt6_sas_census.ui.pages import (
     ConnectionPage,
     CatalogPage,

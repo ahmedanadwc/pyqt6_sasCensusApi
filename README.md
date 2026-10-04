@@ -15,7 +15,6 @@ A native Windows desktop application for the US Census SAS API, built as a PyQt6
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `SAS_CENSUS_SOURCE_ROOT` | Path to the source SAS Census API repository (containing `src/py_sascensusapi`) | `D:\Projects\Python\py_sasCensusApi` |
 | `SAS_PROJECT_ROOT` | Path to the SAS Census API project root (containing `code/macros/censusapi`) | Auto-detected |
 | `SAS_CFGFILE` | Path to personal SASPy config file | Auto-detected (`~/sascfg_personal.py`) |
 
@@ -96,7 +95,7 @@ The executable will be in `dist/PyQt6SasCensus/`.
 
 - The application requires a local SAS installation and valid SASPy configuration on the target workstation
 - PyInstaller will bundle PyQt6, pandas, and Python dependencies
-- SAS macros and the source `py_sascensusapi` package must be available at runtime via `SAS_CENSUS_SOURCE_ROOT`
+- SAS macros must be available at runtime (set `SAS_PROJECT_ROOT` if they are not auto-detected)
 - The executable does **not** include SAS itself
 
 ## Project Structure
@@ -117,7 +116,6 @@ pyqt6_sasCensusApi/
 │       │   └── programs.py         # SAS macro code builders
 │       ├── services/
 │       │   ├── __init__.py
-│       │   ├── source_adapter.py   # Imports source repo modules
 │       │   ├── sas_service.py      # Service layer + typed results
 │       │   └── workers.py          # Qt worker for non-blocking SAS
 │       ├── models/
@@ -131,13 +129,11 @@ pyqt6_sasCensusApi/
 │               ├── __init__.py
 │               ├── connection.py   # Step 1: SAS Session
 │               ├── catalog.py      # Step 2: Collect Catalog
-│               ├── profile.py      # Step 3: Dataset Profile
-│               ├── search.py       # Step 4: Catalog Search
-│               └── query.py        # Step 5: Query Builder
+│               └── profile_query.py  # Step 3: Profile & Query Builder
 └── tests/
     ├── test_state.py
     ├── test_programs.py
-    ├── test_source_adapter.py
+    ├── test_backend.py
     ├── test_sas_service.py
     ├── test_dataframe_model.py
     ├── test_wizard_unlocks.py

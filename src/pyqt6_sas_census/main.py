@@ -3,10 +3,10 @@
 import sys
 from PyQt6.QtWidgets import QApplication
 
+from pyqt6_sas_census import config
 from pyqt6_sas_census.state import WizardState
 from pyqt6_sas_census.services.sas_service import SasService
 from pyqt6_sas_census.sas.backend import SASBackend
-from pyqt6_sas_census.services.source_adapter import source_modules
 from pyqt6_sas_census.ui.wizard import WizardWindow
 
 
@@ -19,18 +19,9 @@ def main() -> int:
     # Initialize state and service
     state = WizardState()
 
-    # Create the SAS backend using this app's own module.
-    # If the standalone source package is available, use its config
-    # to initialize state defaults; otherwise fall back to defaults.
-    config = None
-    try:
-        modules = source_modules()
-        config = modules.config_module
-        if config is not None:
-            state.project_root = str(config.SAS_PROJECT_ROOT)
-            state.sas_config_file = config.DEFAULT_SAS_CFGFILE
-    except ImportError:
-        pass
+    # Initialize state defaults from this app's own config module.
+    state.project_root = str(config.SAS_PROJECT_ROOT)
+    state.sas_config_file = config.DEFAULT_SAS_CFGFILE
 
     backend = SASBackend()
     service = SasService(backend)

@@ -13,7 +13,6 @@ def test_application_modules_import():
     from pyqt6_sas_census.sas.backend import SASBackend, sas_backend
     from pyqt6_sas_census.services.sas_service import SasService, OperationResult
     from pyqt6_sas_census.services.workers import SasWorker
-    from pyqt6_sas_census.services.source_adapter import source_modules, source_root
     from pyqt6_sas_census.models.dataframe_model import DataFrameModel
     from pyqt6_sas_census.ui.widgets import (
         SasLogWidget,
@@ -39,8 +38,6 @@ def test_application_modules_import():
     assert SasService is not None
     assert OperationResult is not None
     assert SasWorker is not None
-    assert source_modules is not None
-    assert source_root is not None
     assert DataFrameModel is not None
     assert SasLogWidget is not None
     assert CodePreviewWidget is not None

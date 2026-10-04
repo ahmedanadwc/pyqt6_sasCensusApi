@@ -9,7 +9,7 @@
 .NOTES
     - The application requires a local SAS installation and SASPy configuration
       on the target workstation. This build script only packages Python dependencies.
-    - SAS macros and the source py_sascensusapi package must be available at runtime.
+    - SAS macros must be available at runtime (set SAS_PROJECT_ROOT if not auto-detected).
 #>
 
 param()
@@ -70,7 +70,6 @@ if (Test-Path $exePath) {
     Write-Host "  - SAS 9.4 or Viya installed"
     Write-Host "  - SASPy configured (sascfg_personal.py)"
     Write-Host "  - SAS Census API macros available"
-    Write-Host "  - SAS_CENSUS_SOURCE_ROOT environment variable set"
 }
 else {
     Write-Error "Build failed: Executable not found at $exePath"
