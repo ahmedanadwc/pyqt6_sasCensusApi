@@ -81,34 +81,3 @@ def source_modules() -> SourceModules:
         search_datasets=search_datasets,
         config_module=config,
     )
-
-
-def get_config():
-    """Return the app config module (standalone or bundled fallback)."""
-    try:
-        return source_modules().config_module
-    except ImportError:
-        pass
-    try:
-        from pyqt6_sas_census import config as bundled
-        return bundled
-    except ImportError:
-        return None
-
-
-def search_with_fallback(query: str, year: str | None) -> tuple[list[dict], bool]:
-    """Search the catalog, falling back to an empty result on network failure.
-
-    Returns (results, was_fallback).  was_fallback is True when the remote
-    catalog could not be reached and an empty list is returned instead of
-    raising, matching the Streamlit app's search_datasets() fallback path.
-    """
-    try:
-        modules = source_modules()
-        if modules.search_datasets is None:
-            return [], True
-        return modules.search_datasets(query=query, year=year), False
-    except Exception:
-        # Network or import failure — return empty so the UI can distinguish
-        # "no results" from "could not reach catalog".
-        return [], True

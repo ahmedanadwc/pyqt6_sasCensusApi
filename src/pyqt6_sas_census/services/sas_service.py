@@ -135,14 +135,6 @@ class SasService:
         code = build_profile_code(api_listing_lib, api_listing_ds, row_id, report_path)
         return self.submit_code(code)
 
-    def search_endpoints(self, query: str, year: str | None) -> tuple[list[dict], bool]:
-        """Search catalog. Returns (results, used_fallback)."""
-        from pyqt6_sas_census.services.source_adapter import (
-            search_with_fallback,
-        )
-
-        return search_with_fallback(query, year)
-
     def submit_query(
         self,
         api_base_url: str,
