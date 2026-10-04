@@ -10,8 +10,8 @@ from typing import List, Dict, Tuple
 
 _PKG_DIR = Path(__file__).resolve().parent
 GEO_JSON_NAME = "census_reg_div_lkup.json"
-# Package folder first, then the repository root (where the file currently lives).
-GEO_JSON_CANDIDATES = [_PKG_DIR / GEO_JSON_NAME, _PKG_DIR.parents[1] / GEO_JSON_NAME]
+# Shipped inside the package (also bundled by PyInstaller at the same relative path).
+GEO_JSON_CANDIDATES = [_PKG_DIR / GEO_JSON_NAME]
 
 
 def find_geo_json() -> Path:

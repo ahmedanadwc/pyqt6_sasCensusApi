@@ -11,6 +11,8 @@ dependencies = [
     "PyQt6",
     "pandas",
     "httpx",
+    "saspy",
+    "duckdb",
 ]
 
 [project.scripts]
@@ -24,3 +26,6 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+pyqt6_sas_census = ["census_reg_div_lkup.json"]

@@ -52,6 +52,7 @@ $pyInstallerArgs = @(
     "--clean"
     "--windowed"
     "--name", "PyQt6SasCensus"
+    "--add-data", "src\pyqt6_sas_census\census_reg_div_lkup.json;pyqt6_sas_census"
     "app.py"
 )
 
