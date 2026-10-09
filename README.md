@@ -1,171 +1,86 @@
-# PyQt6 SAS Census Wizard
+# pyqt6_sasCensusApi
 
-A native Windows desktop application for the US Census SAS API, built as a PyQt6 `QWizard` that replicates the five-step Streamlit workflow with local SASPy execution.
+**A PyQt 6 wizard for interacting with the SAS Census API**
 
-## Prerequisites
+---
 
-- **Python 3.10+**
-- **SAS 9.4 or Viya** installed and configured on the workstation
-- **SASPy** configured with a valid `sascfg_personal.py` (see [SASPy docs](https://sassoftware.github.io/saspy/install.html#configuration-file))
-- **SAS Census API macros** available in a local repository
+## Overview
 
-## Configuration
+`pyqt6_sasCensusApi` provides a native Windows desktop application that guides the user through three logical steps:
 
-### Environment Variables
+1. **Connect & initialise** – Open a SAS session (via SASPy), load a configuration file and run any required environment‑setup code.
+2. **Collect catalog** – Retrieve the full list of datasets available from the SAS Census API (`%censusapi_getAllDataSets`).
+3. **Profile & query** – Inspect a selected dataset’s metadata (`%censusapi_getDsFullInfo`) and construct a custom query (`%censusapi_submitDataApiQuery`).
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `SAS_PROJECT_ROOT` | Path to the SAS Census API project root (containing `code/macros/censusapi`) | Auto-detected |
-| `SAS_CFGFILE` | Path to personal SASPy config file | Auto-detected (`~/sascfg_personal.py`) |
+The wizard tracks shared state in the `WizardState` class and delegates all SAS‑related operations to `SasService`, which wraps the backend implementation in `src/pyqt6_sas_census/sas/backend.py`.
 
-### SASPy Configuration
+---
 
-Ensure your `sascfg_personal.py` defines `SAS_config_names` as a list of configuration names, e.g.:
+## Architecture snapshot (graft output)
 
-```python
-SAS_config_names = ['oda', 'local']
-```
+| Directory | Hotspot symbols |
+|-----------|-----------------|
+| `src/` | `WizardState` (`state.py`), `OperationResult` (`services/sas_service.py`), `SasLogWidget` (`ui/widgets.py`) |
+| `tests/` | `FakeBackend` (`test_sas_service.py`), `_service` (`test_page_status_label.py`) |
+| `resume_evaluator/` | Helper utilities for evaluating resume files |
+
+**Main entry point**: [`app.py`](file:///D:/Projects/Python/pyqt6_sasCensusApi/app.py) – creates the Qt `QApplication`, builds a `WizardWindow`, and starts the event loop.
+
+**Core UI modules**:
+- [`wizard.py`](file:///D:/Projects/Python/pyqt6_sasCensusApi/src/pyqt6_sas_census/ui/wizard.py) – top‑level window
+- [`widgets.py`](file:///D:/Projects/Python/pyqt6_sasCensusApi/src/pyqt6_sas_census/ui/widgets.py) – log view, code preview, etc.
+- Page modules under `src/pyqt6_sas_census/ui/pages/` – connection, catalog, profile/query pages.
+
+**Backend / service**:
+- [`backend.py`](file:///D:/Projects/Python/pyqt6_sasCensusApi/src/pyqt6_sas_census/sas/backend.py) – thin wrapper around SASPy.
+- [`sas_service.py`](file:///D:/Projects/Python/pyqt6_sasCensusApi/src/pyqt6_sas_census/services/sas_service.py) – high‑level operations (`connect`, `collect_catalog`, `submit_code`, etc.).
+
+---
 
 ## Installation
 
 ```bash
-# Clone or navigate to the project
-cd D:\Projects\Python\pyqt6_sasCensusApi
+# Clone the repository
+git clone https://github.com/yourorg/pyqt6_sasCensusApi.git
+cd pyqt6_sasCensusApi
 
-# Install in development mode
-python -m pip install -e .[test]
+# Create a virtual environment
+python -m venv .venv
+.venv\Scripts\activate  # on Windows
 
-# Or install without test dependencies
-python -m pip install -e .
+# Install dependencies
+pip install -r requirements.txt
 ```
 
-## Running the Application
+> **Note**: The project depends on **PyQt6**, **SASPy**, and a valid SAS configuration file. Ensure you have a working SAS installation and the appropriate `sas.cfg` file.
+
+---
+
+## Running the application
 
 ```bash
-# Using the launcher script
-python app.py
-
-# Or using the console script (after installation)
-pyqt6-sas-census
+python -m pyqt6_sas_census.main
 ```
 
-## The Five Wizard Steps
+The wizard window will appear. Follow the three steps to connect to SAS, pull the dataset catalog, and explore/query a dataset.
 
-1. **SAS Session** — Select SAS configuration, connect to SAS, and initialize the Census API environment (SASAUTOS, APILIB, global macro variables).
-
-2. **Collect All Datasets** — Run `%censusapi_getAllDataSets` to fetch the full Census dataset catalog into a SAS dataset. Preview rows, select a dataset, and save generated SAS code.
-
-3. **Dataset Profile** — Run `%censusapi_getDsFullInfo` for the selected catalog row to generate a complete dataset profile. View SAS logs and save code.
-
-4. **Catalog Search** — Search the Census catalog by keyword and vintage. Display matching endpoints and apply the selected endpoint to the query page.
-
-5. **Query Builder** — Build and run `%censusapi_submitDataApiQuery` with automatic variable chunking. View generated code, SAS logs, result data, and save the SAS script.
+---
 
 ## Testing
 
+The test suite lives under `tests/` and validates that all public modules are importable and that the service layer behaves as expected.
+
 ```bash
-# Run all tests
-python -m pytest -q
-
-# Run specific test modules
-python -m pytest tests/test_state.py -q
-python -m pytest tests/test_programs.py -q
-python -m pytest tests/test_sas_service.py -q
-python -m pytest tests/test_dataframe_model.py -q
-python -m pytest tests/test_wizard_unlocks.py -q
-python -m pytest tests/test_imports.py -q
+# Run the unit tests (requires a mock backend)
+pytest
 ```
 
-## Building Windows Executable
-
-```powershell
-# Run the build script
-.\build_windows.ps1
-```
-
-Or manually with PyInstaller:
-
-```powershell
-python -m PyInstaller --noconfirm --clean --windowed --name PyQt6SasCensus app.py
-```
-
-The executable will be in `dist/PyQt6SasCensus/`.
-
-### Packaging Notes
-
-- The application requires a local SAS installation and valid SASPy configuration on the target workstation
-- PyInstaller will bundle PyQt6, pandas, and Python dependencies
-- SAS macros must be available at runtime (set `SAS_PROJECT_ROOT` if they are not auto-detected)
-- The executable does **not** include SAS itself
-
-## Project Structure
-
-```
-pyqt6_sasCensusApi/
-├── app.py                          # Launcher script
-├── build_windows.ps1               # PyInstaller build script
-├── pyproject.toml                  # Package metadata
-├── README.md                       # This file
-├── src/
-│   └── pyqt6_sas_census/
-│       ├── __init__.py
-│       ├── main.py                 # Application entry point
-│       ├── state.py                # WizardState + unlock rules
-│       ├── sas/
-│       │   ├── __init__.py
-│       │   └── programs.py         # SAS macro code builders
-│       ├── services/
-│       │   ├── __init__.py
-│       │   ├── sas_service.py      # Service layer + typed results
-│       │   └── workers.py          # Qt worker for non-blocking SAS
-│       ├── models/
-│       │   ├── __init__.py
-│       │   └── dataframe_model.py  # QAbstractTableModel for pandas
-│       └── ui/
-│           ├── __init__.py
-│           ├── widgets.py          # Reusable Qt widgets
-│           ├── wizard.py           # WizardWindow controller
-│           └── pages/
-│               ├── __init__.py
-│               ├── connection.py   # Step 1: SAS Session
-│               ├── catalog.py      # Step 2: Collect Catalog
-│               └── profile_query.py  # Step 3: Profile & Query Builder
-└── tests/
-    ├── test_state.py
-    ├── test_programs.py
-    ├── test_backend.py
-    ├── test_sas_service.py
-    ├── test_dataframe_model.py
-    ├── test_wizard_unlocks.py
-    └── test_imports.py
-```
-
-## Architecture
-
-```
-PyQt6 QWizard pages
-        |
-        v
-WizardWindow + typed WizardState
-        |
-        v
-SasService (OperationResult) + SasWorker (QThread)
-        |
-        v
-SASBackend (saspy) + census_catalog (httpx)
-        |
-        v
-SAS Session + Census API Macros
-```
-
-## Source Repository
-
-The application reuses the following modules from the source SAS Census API repository (`py_sasCensusApi`):
-
-- `SASBackend` (`sas_backend.py`) — SASPy session management
-- `search_datasets` (`census_catalog.py`) — Census catalog search with fallback
-- `config.py` — Path resolution and defaults
+---
 
 ## License
 
-Internal tool - see source repository for licensing.
+This project is licensed under the MIT License – see the `LICENSE` file for details.
+
+---
+
+*Generated with assistance from the graft code‑graph tooling.*

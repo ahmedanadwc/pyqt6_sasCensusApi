@@ -12,3 +12,17 @@ build/
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 /graft/
+/.codegraph
+/.opencode
+/graphify-out
+/graphify-out
+/graphify-out
+opencode.json
+/graphify-out
+/graphify-out
+/graphify-out/cache
+graphify-out/cache/.gfy-replace-bak-ayenz4w2.tmp
+/graphify-out
+/graphify-out
+opencode.json
+opencode.json
