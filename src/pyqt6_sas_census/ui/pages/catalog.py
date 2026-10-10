@@ -1,38 +1,36 @@
 """Catalog page for the SAS Census wizard."""
 
 from numbers import Integral, Real
-from typing import Optional
+
 from PyQt6.QtCore import pyqtSlot
 from PyQt6.QtWidgets import (
-    QWizardPage,
-    QVBoxLayout,
-    QHBoxLayout,
-    QLineEdit,
-    QPushButton,
-    QLabel,
-    QMessageBox,
-    QGroupBox,
-    QProgressBar,
-    QTextEdit,
-    QScrollArea,
     QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QProgressBar,
+    QPushButton,
+    QScrollArea,
+    QTextEdit,
+    QVBoxLayout,
     QWidget,
+    QWizardPage,
 )
 
+from pyqt6_sas_census import config as cfg
+from pyqt6_sas_census.sas.programs import build_collect_catalog_code
+from pyqt6_sas_census.services.sas_service import OperationResult, SasService
+from pyqt6_sas_census.services.workers import SasWorker
+from pyqt6_sas_census.state import WizardState
 from pyqt6_sas_census.ui.widgets import (
-    SasLogWidget,
     CollapsibleCodeWidget,
     DataFrameWidget,
+    SasLogWidget,
     add_form_field,
     make_form_grid,
     status_label,
 )
-from pyqt6_sas_census.services.workers import SasWorker
-from pyqt6_sas_census.services.sas_service import SasService, OperationResult
-from pyqt6_sas_census.sas.programs import build_collect_catalog_code
-from pyqt6_sas_census.state import WizardState
-from pyqt6_sas_census import config as cfg
-
 
 # Preview columns from the source implementation (matches KEEP option in ds_opts)
 CATALOG_PREVIEW_COLUMNS = [
@@ -57,7 +55,7 @@ class CatalogPage(QWizardPage):
         self.setSubTitle("Retrieve the full Census dataset catalog into a SAS dataset.")
         self._state = state
         self._service = service
-        self._worker: Optional[SasWorker] = None
+        self._worker: SasWorker | None = None
 
         self._setup_ui()
         self._refresh_code_preview()
@@ -196,27 +194,39 @@ class CatalogPage(QWizardPage):
     def _on_run(self) -> None:
         self._refresh_code_preview()
         self._run_btn.setEnabled(False)
+        out_lib = self._out_lib_edit.text().strip() or "APILIB"
+        out_ds = self._out_ds_edit.text().strip() or "_API_ALL_DATA"
+        data_json_url = (
+            self._data_json_url_edit.text().strip()
+            or "https://api.census.gov/data.json"
+        )
+        report_path = self._report_path_edit.text().strip() or "&g_outputRoot"
         self._run_worker(
             lambda: self._service.collect_catalog(
-                out_lib=self._out_lib_edit.text().strip() or "APILIB",
-                out_ds=self._out_ds_edit.text().strip() or "_API_ALL_DATA",
-                data_json_url=self._data_json_url_edit.text().strip()
-                or "https://api.census.gov/data.json",
-                report_path=self._report_path_edit.text().strip() or "&g_outputRoot",
+                out_lib=out_lib,
+                out_ds=out_ds,
+                data_json_url=data_json_url,
+                report_path=report_path,
             )
         )
 
-    def _run_worker(self, func) -> None:
+    def _run_worker(self, func, finished_handler=None, failed_handler=None) -> None:
+        if not self._service.try_begin_operation():
+            (failed_handler or self._on_worker_failed)(
+                "Another SAS operation is already in progress."
+            )
+            return
+
         from PyQt6.QtCore import QThread
 
         self._progress.setVisible(True)
         self._run_btn.setEnabled(False)
         self._worker_thread = QThread()
-        self._worker = SasWorker(func)
+        self._worker = SasWorker(self._service.run_reserved_operation, func)
         self._worker.moveToThread(self._worker_thread)
         self._worker_thread.started.connect(self._worker.run)
-        self._worker.finished.connect(self._on_worker_finished)
-        self._worker.failed.connect(self._on_worker_failed)
+        self._worker.finished.connect(finished_handler or self._on_worker_finished)
+        self._worker.failed.connect(failed_handler or self._on_worker_failed)
         self._worker.finished.connect(self._worker_thread.quit)
         self._worker.failed.connect(self._worker_thread.quit)
         self._worker.finished.connect(self._worker.deleteLater)
@@ -277,25 +287,44 @@ class CatalogPage(QWizardPage):
     def _try_fetch_existing(self) -> None:
         lib = self._state.step2_lib
         ds = self._state.step2_dataset
-        # Try to re-use the existing dataframe if it was already fetched
         df = self._state.step2_dataframe
         if df is not None:
             self._df_widget.set_dataframe(df)
             self._clear_details()
             return
-        else:
-            # Try to fetch the dataset from SAS
-            df = self._service.backend.fetch_dataframe(
+
+        self._run_btn.setEnabled(False)
+        self._progress.setVisible(True)
+
+        self._run_worker(
+            lambda: self._service.backend.fetch_dataframe(
                 ds,
                 lib,
                 ds_opts={
                     "KEEP": "_rowid_ ds_unique_id baseurl c_vintage title description modified Spatial microdata_i"
                 },
-            )
-            if df is not None:
-                self._state.step2_dataframe = df
-                self._df_widget.set_dataframe(df)
-                self._clear_details()
+            ),
+            finished_handler=self._on_existing_catalog_loaded,
+            failed_handler=self._on_existing_catalog_failed,
+        )
+
+    @pyqtSlot(object)
+    def _on_existing_catalog_loaded(self, dataframe) -> None:
+        self._progress.setVisible(False)
+        self._run_btn.setEnabled(True)
+        if dataframe is not None:
+            self._state.step2_dataframe = dataframe
+            self._df_widget.set_dataframe(dataframe)
+            self._clear_details()
+            self._reselect_previous_row()
+            self.completeChanged.emit()
+
+    @pyqtSlot(str)
+    def _on_existing_catalog_failed(self, error: str) -> None:
+        self._progress.setVisible(False)
+        self._run_btn.setEnabled(True)
+        self._log.append_log(f"Worker error: {error}")
+        status_label(self._status_label, False, f"Worker error: {error}")
 
     @staticmethod
     def _format_value(value) -> str:

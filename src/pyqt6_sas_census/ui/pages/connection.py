@@ -1,29 +1,32 @@
 """Connection page for the SAS Census wizard."""
 
 import ast
+import logging
 from pathlib import Path
-from typing import Optional
-from PyQt6.QtCore import QThread, pyqtSlot, Qt
+
+from PyQt6.QtCore import Qt, QThread, pyqtSlot
 from PyQt6.QtWidgets import (
-    QWizardPage,
-    QVBoxLayout,
-    QHBoxLayout,
-    QFormLayout,
-    QLineEdit,
     QComboBox,
-    QPushButton,
-    QLabel,
     QFileDialog,
-    QMessageBox,
+    QFormLayout,
     QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
     QProgressBar,
+    QPushButton,
+    QVBoxLayout,
+    QWizardPage,
 )
 
-from pyqt6_sas_census.ui.widgets import SasLogWidget, status_label
+from pyqt6_sas_census import config as cfg
+from pyqt6_sas_census.services.sas_service import OperationResult, SasService
 from pyqt6_sas_census.services.workers import SasWorker
 from pyqt6_sas_census.state import WizardState
-from pyqt6_sas_census.services.sas_service import SasService, OperationResult
-from pyqt6_sas_census import config as cfg
+from pyqt6_sas_census.ui.widgets import SasLogWidget, status_label
+
+logger = logging.getLogger(__name__)
 
 
 class ConnectionPage(QWizardPage):
@@ -37,8 +40,8 @@ class ConnectionPage(QWizardPage):
         )
         self._state = state
         self._service = service
-        self._worker_thread: Optional[QThread] = None
-        self._worker: Optional[SasWorker] = None
+        self._worker_thread: QThread | None = None
+        self._worker: SasWorker | None = None
 
         self._setup_ui()
         self._load_config_names()
@@ -192,20 +195,21 @@ class ConnectionPage(QWizardPage):
                         if (
                             isinstance(target, ast.Name)
                             and target.id == "SAS_config_names"
+                            and isinstance(node.value, (ast.List, ast.Tuple))
                         ):
-                            if isinstance(node.value, (ast.List, ast.Tuple)):
-                                for elt in node.value.elts:
-                                    if isinstance(elt, ast.Constant) and isinstance(
-                                        elt.value, str
-                                    ):
-                                        config_names.append(elt.value)
+                            for elt in node.value.elts:
+                                if isinstance(elt, ast.Constant) and isinstance(
+                                    elt.value, str
+                                ):
+                                    config_names.append(elt.value)
 
             self._cfgname_combo.clear()
             self._cfgname_combo.addItems(config_names)
             if config_names:
                 self._cfgname_combo.setCurrentIndex(0)
         except Exception:
-            pass  # Silently ignore parse errors
+            # A bad config file must not break the page; leave the name list as is.
+            logger.warning("Could not parse SAS config file %s", cfgfile, exc_info=True)
 
     def _on_connect(self) -> None:
         cfgfile = self._cfgfile_edit.text().strip()
@@ -217,21 +221,11 @@ class ConnectionPage(QWizardPage):
             return
 
         self._run_worker(
-            lambda: self._service.connect(cfgname, cfgfile if cfgfile else None)
+            lambda: self._service.connect(cfgname, cfgfile)
         )
-        self._connect_btn.setEnabled(False)
-        self._disconnect_btn.setEnabled(True)
-        self._init_env_btn.setEnabled(True)
 
     def _on_disconnect(self) -> None:
         self._run_worker(self._service.disconnect)
-        self._connect_btn.setEnabled(True)
-        self._disconnect_btn.setEnabled(False)
-        self._init_env_btn.setEnabled(False)
-        # Navigate back to page 1 per spec: disconnect resets the wizard
-        wizard = self.wizard()
-        if wizard is not None and hasattr(wizard, "_on_disconnect_requested"):
-            wizard._on_disconnect_requested()
 
     def _on_init_env(self) -> None:
         project_root = self._project_root_edit.text().strip()
@@ -249,12 +243,16 @@ class ConnectionPage(QWizardPage):
         )
 
     def _run_worker(self, func) -> None:
+        if not self._service.try_begin_operation():
+            self._on_worker_failed("Another SAS operation is already in progress.")
+            return
+
         self._progress.setVisible(True)
         self._connect_btn.setEnabled(False)
         self._disconnect_btn.setEnabled(False)
         self._init_env_btn.setEnabled(False)
         self._worker_thread = QThread()
-        self._worker = SasWorker(func)
+        self._worker = SasWorker(self._service.run_reserved_operation, func)
         self._worker.moveToThread(self._worker_thread)
         self._worker_thread.started.connect(self._worker.run)
         self._worker.finished.connect(self._on_worker_finished)
@@ -280,6 +278,10 @@ class ConnectionPage(QWizardPage):
         # Update buttons AFTER state is updated
         self._disconnect_btn.setEnabled(self._state.sas_connected)
         self._init_env_btn.setEnabled(self._state.sas_connected)
+        if result.metadata.get("session_cleared") or "SAS session ended" in result.log:
+            wizard = self.wizard()
+            if wizard is not None and hasattr(wizard, "_on_disconnect_requested"):
+                wizard._on_disconnect_requested()
 
     @pyqtSlot(str)
     def _on_worker_failed(self, error: str) -> None:
@@ -292,7 +294,11 @@ class ConnectionPage(QWizardPage):
         self._init_env_btn.setEnabled(self._state.sas_connected)
 
     def _update_state_from_result(self, result: OperationResult) -> None:
-        if "Successfully connected" in result.log:
+        if result.metadata.get("session_cleared") or "SAS session ended" in result.log:
+            self._state.reset_after_disconnect()
+            self._update_connection_badge(False, "")
+            self.completeChanged.emit()
+        elif "Successfully connected" in result.log:
             self._state.sas_connected = True
             self._state.sas_config_file = self._cfgfile_edit.text().strip()
             self._state.sas_config_name = self._cfgname_combo.currentText().strip()
@@ -300,10 +306,6 @@ class ConnectionPage(QWizardPage):
             self._update_connection_badge(
                 True, self._cfgname_combo.currentText().strip()
             )
-            self.completeChanged.emit()
-        elif "SAS session ended" in result.log:
-            self._state.reset_after_disconnect()
-            self._update_connection_badge(False, "")
             self.completeChanged.emit()
         elif "setup" in result.log.lower() or "initialization" in result.log.lower():
             if result.success:

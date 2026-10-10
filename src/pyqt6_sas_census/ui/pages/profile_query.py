@@ -1,43 +1,42 @@
 """Combined Profile & Query page for the SAS Census wizard (Step 3)."""
 
-from typing import Any, Optional
+from typing import Any
+
+import pandas as pd
 from PyQt6.QtCore import Qt, QThread, pyqtSlot
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QFrame,
-    QWizardPage,
-    QVBoxLayout,
-    QHBoxLayout,
-    QLineEdit,
-    QPushButton,
-    QLabel,
-    QMessageBox,
     QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
     QProgressBar,
-    QTabWidget,
-    QWidget,
-    QTextEdit,
+    QPushButton,
+    QScrollArea,
     QSpinBox,
     QSplitter,
-    QScrollArea,
-    QCheckBox,
+    QTabWidget,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+    QWizardPage,
 )
 
+from pyqt6_sas_census.sas.programs import build_profile_code, build_query_code
+from pyqt6_sas_census.services.sas_service import OperationResult, SasService
+from pyqt6_sas_census.services.workers import SasWorker
+from pyqt6_sas_census.state import WizardState
+from pyqt6_sas_census.ui.geo_selector_dialog import open_geo_dialog
 from pyqt6_sas_census.ui.widgets import (
-    SasLogWidget,
-    CodePreviewWidget,
     CollapsibleCodeWidget,
     DataFrameWidget,
+    SasLogWidget,
     add_form_field,
     make_form_grid,
     status_label,
 )
-from pyqt6_sas_census.ui.geo_selector_dialog import open_geo_dialog
-from pyqt6_sas_census.services.workers import SasWorker
-from pyqt6_sas_census.services.sas_service import SasService, OperationResult
-from pyqt6_sas_census.sas.programs import build_profile_code, build_query_code
-from pyqt6_sas_census.state import WizardState
-from pyqt6_sas_census import config as cfg
-
 
 # Cap on query result rows kept in memory / shown (the SAS table itself is untouched).
 MAX_QUERY_ROWS = 1000
@@ -62,12 +61,13 @@ class ProfileQueryPage(QWizardPage):
         )
         self._state = state
         self._service = service
-        self._worker: Optional[SasWorker] = None
-        self._worker_thread: Optional[QThread] = None
+        self._worker: SasWorker | None = None
+        self._worker_thread: QThread | None = None
         self._profile_tables: dict[
             str, tuple[str, Any]
         ] = {}  # label -> (table_name, dataframe)
         self._current_operation: str = ""
+        self._loading_fields = False
 
         self._setup_ui()
 
@@ -292,19 +292,9 @@ class ProfileQueryPage(QWizardPage):
 
     def initializePage(self) -> None:
         super().initializePage()
-        # Pre-fill from state - check widget exists first
-        if not hasattr(self, "_api_lib_edit") or self._api_lib_edit is None:
-            return
-        try:
-            if self._state.step2_lib:
-                self._api_lib_edit.setText(self._state.step2_lib)
-        except RuntimeError:
-            # Widget was deleted, re-setup UI
-            self._setup_ui()
-            if self._state.step2_lib:
-                self._api_lib_edit.setText(self._state.step2_lib)
-            return
-
+        # Pre-fill from state
+        if self._state.step2_lib:
+            self._api_lib_edit.setText(self._state.step2_lib)
         if self._state.step2_dataset:
             self._api_ds_edit.setText(self._state.step2_dataset)
         if self._state.selected_row_id:
@@ -320,13 +310,19 @@ class ProfileQueryPage(QWizardPage):
         # Load per-dataset query fields if available
         uid = self._state.dataset_unique_id or ""
         if uid and uid in self._state.step3_query_fields:
-            fields = self._state.step3_query_fields[uid]
-            if "get" in fields:
-                self._get_clause_edit.setPlainText(fields["get"])
-            if "for" in fields:
-                self._for_clause_edit.setText(fields["for"])
-            if "in" in fields:
-                self._in_clause_edit.setText(fields["in"])
+            # Work on a copy and mute the auto-save handler: setting one widget
+            # must not overwrite the saved values of the others.
+            fields = dict(self._state.step3_query_fields[uid])
+            self._loading_fields = True
+            try:
+                if "get" in fields:
+                    self._get_clause_edit.setPlainText(fields["get"])
+                if "for" in fields:
+                    self._for_clause_edit.setText(fields["for"])
+                if "in" in fields:
+                    self._in_clause_edit.setText(fields["in"])
+            finally:
+                self._loading_fields = False
 
         self._refresh_profile_code_preview()
         self._refresh_query_code_preview()
@@ -345,19 +341,22 @@ class ProfileQueryPage(QWizardPage):
             )
             self._profile_code_preview.set_code(code)
 
-    def _refresh_query_code_preview(self) -> None:
-        code = build_query_code(
-            self._endpoint_edit.text().strip()
+    def _query_args(self) -> dict[str, Any]:
+        """Query inputs with defaults applied; shared by the preview and the run."""
+        return {
+            "api_base_url": self._endpoint_edit.text().strip()
             or "https://api.census.gov/data/2000/dec/sf1?",
-            self._get_clause_edit.toPlainText().strip() or "get=NAME",
-            self._for_clause_edit.text().strip() or "for=state:*",
-            self._in_clause_edit.text().strip() or "in=",
-            self._dataset_id_edit.text().strip() or "_114_dec_2000",
-            self._out_dataset_edit.text().strip() or "work.sf1_response",
-            self._api_key_ref_edit.text().strip() or "&g_apiKey",
-            self._max_var_count_spin.value(),
-        )
-        self._query_code_preview.set_code(code)
+            "get_clause": self._get_clause_edit.toPlainText().strip() or "get=NAME",
+            "for_clause": self._for_clause_edit.text().strip() or "for=state:*",
+            "in_clause": self._in_clause_edit.text().strip() or "in=",
+            "dataset_id": self._dataset_id_edit.text().strip() or "_114_dec_2000",
+            "out_dataset": self._out_dataset_edit.text().strip() or "work.sf1_response",
+            "api_key_ref": self._api_key_ref_edit.text().strip() or "&g_apiKey",
+            "max_var_count": self._max_var_count_spin.value(),
+        }
+
+    def _refresh_query_code_preview(self) -> None:
+        self._query_code_preview.set_code(build_query_code(**self._query_args()))
 
     # === Profile Operations ===
 
@@ -369,43 +368,45 @@ class ProfileQueryPage(QWizardPage):
             )
             return
 
-        # Check if "Reuse Existing Profile Tables" is checked and tables exist
         reuse = self._reuse_profile_check.isChecked()
-        if reuse and self._state.dataset_unique_id:
-            existing_tables = self._service.fetch_profile_tables(
-                self._state.dataset_unique_id
-            )
-            if len(existing_tables) == 4:  # All 4 tables exist
-                self._populate_profile_tabs(existing_tables)
-                self._profile_log.set_log(
-                    "Reused existing APILIB profile tables; %censusapi_getDsFullInfo was not re-run."
+        dataset_unique_id = self._state.dataset_unique_id
+        profile_args = {
+            "api_listing_lib": self._api_lib_edit.text().strip() or "APILIB",
+            "api_listing_ds": self._api_ds_edit.text().strip() or "_API_ALL_DATA",
+            "row_id": row_id,
+            "report_path": self._profile_report_path_edit.text().strip()
+            or "&g_outputRoot",
+        }
+
+        def run_profile():
+            if reuse and dataset_unique_id:
+                existing_tables = self._service.fetch_profile_tables(
+                    dataset_unique_id
                 )
-                status_label(
-                    self._profile_status, True, "Success (reused existing tables)"
+                if len(existing_tables) == 4:
+                    return OperationResult(
+                        success=True,
+                        log="Reused existing APILIB profile tables; "
+                        "%censusapi_getDsFullInfo was not re-run.",
+                        metadata={"profile_tables": existing_tables, "reused": True},
+                    )
+
+            result = self._service.profile_dataset(**profile_args)
+            if result.success and dataset_unique_id:
+                result.metadata["profile_tables"] = (
+                    self._service.fetch_profile_tables(
+                        dataset_unique_id, force_refresh=True
+                    )
                 )
-                self._state.step3_profile_result = {
-                    "success": True,
-                    "log": "Reused existing tables",
-                }
-                self._run_profile_btn.setEnabled(True)
-                self._refresh_profile_btn.setEnabled(True)
-                return
+            return result
 
         self._current_operation = "profile"
         self._refresh_profile_code_preview()
         self._run_profile_btn.setEnabled(False)
         self._refresh_profile_btn.setEnabled(False)
+        self._run_query_btn.setEnabled(False)
         self._profile_progress.setVisible(True)
-
-        self._run_worker(
-            lambda: self._service.profile_dataset(
-                api_listing_lib=self._api_lib_edit.text().strip() or "APILIB",
-                api_listing_ds=self._api_ds_edit.text().strip() or "_API_ALL_DATA",
-                row_id=row_id,
-                report_path=self._profile_report_path_edit.text().strip()
-                or "&g_outputRoot",
-            )
-        )
+        self._run_worker(run_profile)
 
     def _on_refresh_profile(self) -> None:
         """Refresh profile tables from SAS (bypass cache)."""
@@ -417,25 +418,51 @@ class ProfileQueryPage(QWizardPage):
         """Try to load existing profile tables for the selected dataset."""
         uid = self._state.dataset_unique_id
         if not uid:
+            self._populate_profile_tabs({})
             return
         self._load_profile_tables(force_refresh=False)
 
     def _load_profile_tables(self, force_refresh: bool = False) -> None:
-        """Load profile tables from SASHELP.VTABLE and fetch data."""
-        if not self._state.dataset_unique_id:
+        """Load profile tables without blocking the Qt event loop."""
+        dataset_unique_id = self._state.dataset_unique_id
+        if not dataset_unique_id:
             return
 
-        tables = self._service.fetch_profile_tables(self._state.dataset_unique_id)
-        if tables:
-            self._populate_profile_tabs(tables)
+        self._run_profile_btn.setEnabled(False)
+        self._refresh_profile_btn.setEnabled(False)
+        self._run_query_btn.setEnabled(False)
+        self._profile_progress.setVisible(True)
+        self._run_worker(
+            lambda: self._service.fetch_profile_tables(
+                dataset_unique_id, force_refresh=force_refresh
+            ),
+            finished_handler=self._on_profile_tables_loaded,
+            failed_handler=self._on_profile_tables_failed,
+        )
+
+    @pyqtSlot(object)
+    def _on_profile_tables_loaded(self, tables: dict) -> None:
+        self._profile_progress.setVisible(False)
+        self._run_profile_btn.setEnabled(True)
+        self._refresh_profile_btn.setEnabled(bool(self._state.dataset_unique_id))
+        self._run_query_btn.setEnabled(True)
+        self._populate_profile_tabs(tables)
+
+    @pyqtSlot(str)
+    def _on_profile_tables_failed(self, error: str) -> None:
+        self._profile_progress.setVisible(False)
+        self._run_profile_btn.setEnabled(True)
+        self._refresh_profile_btn.setEnabled(bool(self._state.dataset_unique_id))
+        self._run_query_btn.setEnabled(True)
+        self._profile_log.append_log(f"Worker error: {error}")
+        status_label(self._profile_status, False, f"Worker error: {error}")
 
     def _populate_profile_tabs(self, tables: dict) -> None:
         """Populate the profile tabs with fetched table data."""
-        for label, (table_name, df) in tables.items():
-            if label in self._profile_tab_widgets:
-                self._profile_tab_widgets[label].set_dataframe(df)
-                # Store table name for reference
-                self._profile_tab_widgets[label].setProperty("table_name", table_name)
+        for label, widget in self._profile_tab_widgets.items():
+            table_name, df = tables.get(label, (None, pd.DataFrame()))
+            widget.set_dataframe(df)
+            widget.setProperty("table_name", table_name)
 
     @pyqtSlot(object)
     def _on_worker_finished(self, result: OperationResult) -> None:
@@ -457,11 +484,16 @@ class ProfileQueryPage(QWizardPage):
                 "report_path": self._profile_report_path_edit.text().strip(),
             }
             self._state.step3_profile_result = {"success": True, "log": result.log}
-
-            # After profile runs, try to load the generated tables
-            self._load_profile_tables(force_refresh=True)
+            profile_tables = (result.metadata or {}).get("profile_tables")
+            if profile_tables:
+                self._populate_profile_tabs(profile_tables)
+            if (result.metadata or {}).get("reused"):
+                status_label(
+                    self._profile_status, True, "Success (reused existing tables)"
+                )
         else:
             self._state.step3_profile_result = {"success": False, "log": result.log}
+        self._run_query_btn.setEnabled(True)
 
     # === Query Operations ===
 
@@ -479,23 +511,16 @@ class ProfileQueryPage(QWizardPage):
             )
             return
 
+        query_args = self._query_args()
         self._current_operation = "query"
         self._refresh_query_code_preview()
         self._run_query_btn.setEnabled(False)
+        self._run_profile_btn.setEnabled(False)
+        self._refresh_profile_btn.setEnabled(False)
         self._query_progress.setVisible(True)
 
         self._run_worker(
-            lambda: self._service.submit_query(
-                api_base_url=endpoint,
-                get_clause=self._get_clause_edit.toPlainText().strip(),
-                for_clause=self._for_clause_edit.text().strip(),
-                in_clause=self._in_clause_edit.text().strip(),
-                dataset_id=dataset_id,
-                out_dataset=self._out_dataset_edit.text().strip(),
-                api_key_ref=self._api_key_ref_edit.text().strip(),
-                max_var_count=self._max_var_count_spin.value(),
-                max_rows=MAX_QUERY_ROWS,
-            )
+            lambda: self._service.submit_query(**query_args, max_rows=MAX_QUERY_ROWS)
         )
 
     @pyqtSlot(object)
@@ -536,6 +561,8 @@ class ProfileQueryPage(QWizardPage):
                 )
         else:
             self._state.step3_query_result = {"success": False, "log": result.log}
+        self._run_profile_btn.setEnabled(True)
+        self._refresh_profile_btn.setEnabled(bool(self._state.dataset_unique_id))
 
     # === Selection Handlers ===
 
@@ -610,6 +637,8 @@ class ProfileQueryPage(QWizardPage):
 
     def _on_query_field_changed(self) -> None:
         """Auto-save GET, FOR and IN clauses to per-dataset query fields."""
+        if self._loading_fields:
+            return
         uid = self._state.dataset_unique_id or ""
         if not uid:
             return
@@ -669,17 +698,28 @@ class ProfileQueryPage(QWizardPage):
 
     # === Worker Management ===
 
-    def _run_worker(self, func) -> None:
+    def _run_worker(self, func, finished_handler=None, failed_handler=None) -> None:
+        operation = self._current_operation
+        error_handler = failed_handler or (
+            self._on_profile_worker_failed
+            if operation == "profile"
+            else self._on_query_worker_failed
+        )
+        if not self._service.try_begin_operation():
+            error_handler("Another SAS operation is already in progress.")
+            return
+
         self._worker_thread = QThread()
-        self._worker = SasWorker(func)
+        self._worker = SasWorker(self._service.run_reserved_operation, func)
         self._worker.moveToThread(self._worker_thread)
 
-        if self._current_operation == "profile":
-            self._worker.finished.connect(self._on_worker_finished)
-        elif self._current_operation == "query":
-            self._worker.finished.connect(self._on_query_finished)
-
-        self._worker.failed.connect(self._on_worker_failed)
+        default_finished_handler = (
+            self._on_worker_finished
+            if operation == "profile"
+            else self._on_query_finished
+        )
+        self._worker.finished.connect(finished_handler or default_finished_handler)
+        self._worker.failed.connect(error_handler)
         self._worker.finished.connect(self._worker_thread.quit)
         self._worker.failed.connect(self._worker_thread.quit)
         self._worker.finished.connect(self._worker.deleteLater)
@@ -689,17 +729,29 @@ class ProfileQueryPage(QWizardPage):
         self._worker_thread.start()
 
     @pyqtSlot(str)
-    def _on_worker_failed(self, error: str) -> None:
-        if self._current_operation == "profile":
+    def _on_profile_worker_failed(self, error: str) -> None:
+        self._on_worker_failed(error, operation="profile")
+
+    @pyqtSlot(str)
+    def _on_query_worker_failed(self, error: str) -> None:
+        self._on_worker_failed(error, operation="query")
+
+    @pyqtSlot(str)
+    def _on_worker_failed(self, error: str, operation: str | None = None) -> None:
+        operation = operation or self._current_operation
+        if operation == "profile":
             self._profile_progress.setVisible(False)
             self._run_profile_btn.setEnabled(True)
             self._refresh_profile_btn.setEnabled(True)
+            self._run_query_btn.setEnabled(True)
             self._profile_log.append_log(f"Worker error: {error}")
             status_label(self._profile_status, False, f"Worker error: {error}")
             self._state.step3_profile_result = {"success": False, "log": error}
-        elif self._current_operation == "query":
+        elif operation == "query":
             self._query_progress.setVisible(False)
             self._run_query_btn.setEnabled(True)
+            self._run_profile_btn.setEnabled(True)
+            self._refresh_profile_btn.setEnabled(bool(self._state.dataset_unique_id))
             self._query_log.append_log(f"Worker error: {error}")
             status_label(self._query_status, False, f"Worker error: {error}")
             self._state.step3_query_result = {"success": False, "log": error}
@@ -718,4 +770,3 @@ class ProfileQueryPage(QWizardPage):
 
 
 # Need to add Qt import
-from PyQt6.QtCore import Qt

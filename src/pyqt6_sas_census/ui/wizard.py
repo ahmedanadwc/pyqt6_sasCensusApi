@@ -1,13 +1,12 @@
 """Main wizard window for the PyQt6 SAS Census application."""
 
-from PyQt6.QtCore import QTimer
-from PyQt6.QtWidgets import QWizard, QMessageBox
+from PyQt6.QtWidgets import QWizard
 
-from pyqt6_sas_census.state import WizardState, highest_unlocked_step
 from pyqt6_sas_census.services.sas_service import SasService
+from pyqt6_sas_census.state import WizardState, highest_unlocked_step
 from pyqt6_sas_census.ui.pages import (
-    ConnectionPage,
     CatalogPage,
+    ConnectionPage,
     ProfileQueryPage,
 )
 
@@ -36,7 +35,6 @@ class WizardWindow(QWizard):
 
         # Connect signals
         self.currentIdChanged.connect(self._on_page_changed)
-        self.finished.connect(self._on_finished)
         # Also update navigation when any page completes
         self._connection_page.completeChanged.connect(self._update_navigation)
         self._catalog_page.completeChanged.connect(self._update_navigation)
@@ -63,18 +61,32 @@ class WizardWindow(QWizard):
             if page:
                 page.setEnabled(i <= max_unlocked)
 
-    def _on_finished(self, result: int) -> None:
-        if result == QWizard.DialogCode.Accepted:
-            # Clean up SAS session on normal exit
-            self._service.disconnect()
-
     def _on_disconnect_requested(self) -> None:
         """Reset state and navigate back to page 1."""
         self._state.reset_after_disconnect()
         self.setCurrentId(0)
         self._update_navigation()
 
+    def _prepare_to_close(self) -> bool:
+        if not self._service.try_begin_operation():
+            self.setWindowTitle("A SAS operation is still running; please wait.")
+            return False
+        try:
+            self._service.disconnect()
+        finally:
+            self._service.end_operation()
+        return True
+
+    def accept(self) -> None:
+        if self._prepare_to_close():
+            super().accept()
+
+    def reject(self) -> None:
+        if self._prepare_to_close():
+            super().reject()
+
     def closeEvent(self, event) -> None:
-        # Ensure disconnect on close
-        self._service.disconnect()
+        if not self._prepare_to_close():
+            event.ignore()
+            return
         super().closeEvent(event)
