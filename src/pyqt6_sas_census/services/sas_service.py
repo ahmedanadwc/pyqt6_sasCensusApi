@@ -1,7 +1,9 @@
 """Service layer for SAS operations with typed results."""
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from threading import Lock
+from typing import Any
+
 import pandas as pd
 
 from pyqt6_sas_census.sas.programs import (
@@ -20,7 +22,7 @@ class OperationResult:
     lst: str = ""
     errors: list[str] | None = None
     warnings: list[str] | None = None
-    dataframe: Optional[pd.DataFrame] = None
+    dataframe: pd.DataFrame | None = None
     metadata: dict | None = None
 
     def __post_init__(self):
@@ -37,6 +39,22 @@ class SasService:
 
     def __init__(self, backend: Any) -> None:
         self.backend = backend
+        self._operation_lock = Lock()
+
+    def try_begin_operation(self) -> bool:
+        """Reserve the shared SAS session for one background operation."""
+        return self._operation_lock.acquire(blocking=False)
+
+    def end_operation(self) -> None:
+        """Release the reservation acquired by try_begin_operation."""
+        self._operation_lock.release()
+
+    def run_reserved_operation(self, operation):
+        """Run a reserved operation and release the shared SAS session afterward."""
+        try:
+            return operation()
+        finally:
+            self.end_operation()
 
     def connect(self, cfgname: str, cfgfile: str) -> OperationResult:
         ok, msg = self.backend.connect(cfgname, cfgfile)
@@ -49,7 +67,15 @@ class SasService:
     def disconnect(self) -> OperationResult:
         if not self.backend.is_connected:
             return OperationResult(success=True, log="No active SAS session.")
-        msg = self.backend.disconnect()
+        try:
+            msg = self.backend.disconnect()
+        except Exception as exc:
+            return OperationResult(
+                success=False,
+                log=f"Failed to disconnect SAS session: {exc}",
+                errors=[str(exc)],
+                metadata={"session_cleared": not self.backend.is_connected},
+            )
         return OperationResult(success=True, log=msg)
 
     def initialize_environment(
@@ -191,7 +217,7 @@ class SasService:
         return result
 
     def fetch_profile_tables(
-        self, ds_unique_id: str
+        self, ds_unique_id: str, force_refresh: bool = False
     ) -> dict[str, tuple[str, pd.DataFrame]]:
         """Find and fetch profile tables for a dataset unique ID.
 
@@ -200,10 +226,14 @@ class SasService:
         if not self.backend.is_connected:
             return {}
 
-        table_names = self.backend.find_step3_tables(ds_unique_id)
+        table_names = self.backend.find_step3_tables(
+            ds_unique_id, force_refresh=force_refresh
+        )
         result = {}
         for label, table_name in table_names.items():
-            df = self.backend.fetch_dataframe(table_name, "APILIB")
+            df = self.backend.fetch_dataframe(
+                table_name, "APILIB", force_refresh=force_refresh
+            )
             if df is not None:
                 result[label] = (table_name, df)
         return result

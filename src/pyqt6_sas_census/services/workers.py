@@ -1,6 +1,10 @@
 """Qt worker for non-blocking SAS operations."""
 
+import logging
+
 from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
+
+logger = logging.getLogger(__name__)
 
 
 class SasWorker(QObject):
@@ -21,4 +25,5 @@ class SasWorker(QObject):
             result = self._callable(*self._args, **self._kwargs)
             self.finished.emit(result)
         except Exception as exc:
+            logger.exception("SAS worker operation failed")
             self.failed.emit(str(exc))

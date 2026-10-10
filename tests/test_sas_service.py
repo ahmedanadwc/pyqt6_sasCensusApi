@@ -22,6 +22,77 @@ class FakeBackend:
         return None
 
 
+def test_service_profile_table_refresh_bypasses_backend_cache():
+    backend = FakeBackend()
+    backend.is_connected = True
+    find_calls = []
+
+    def find_tables(ds_unique_id, force_refresh=False):
+        find_calls.append(force_refresh)
+        return {"variables": "vars"}
+
+    backend.find_step3_tables = find_tables
+    calls = []
+
+    def fetch_dataframe(table_name, libref="WORK", ds_opts=None, force_refresh=False):
+        calls.append(force_refresh)
+        return None
+
+    backend.fetch_dataframe = fetch_dataframe
+    service = SasService(backend)
+
+    service.fetch_profile_tables("dataset-id", force_refresh=True)
+
+    assert find_calls == [True]
+    assert calls == [True]
+
+
+def test_service_disconnect_reports_backend_failure():
+    backend = FakeBackend()
+    backend.is_connected = True
+
+    def disconnect():
+        backend.is_connected = False
+        raise RuntimeError("SAS session could not be closed")
+
+    backend.disconnect = disconnect
+    result = SasService(backend).disconnect()
+
+    assert result.success is False
+    assert result.errors == ["SAS session could not be closed"]
+    assert result.metadata["session_cleared"] is True
+
+
+def test_service_allows_only_one_in_flight_backend_operation():
+    service = SasService(FakeBackend())
+
+    assert service.try_begin_operation() is True
+    assert service.try_begin_operation() is False
+
+    assert service.run_reserved_operation(lambda: "completed") == "completed"
+
+    assert service.try_begin_operation() is True
+    service.end_operation()
+
+
+def test_service_releases_operation_reservation_when_operation_fails():
+    service = SasService(FakeBackend())
+    assert service.try_begin_operation() is True
+
+    def fail():
+        raise RuntimeError("operation failed")
+
+    try:
+        service.run_reserved_operation(fail)
+    except RuntimeError as exc:
+        assert str(exc) == "operation failed"
+    else:
+        raise AssertionError("the operation failure should be propagated")
+
+    assert service.try_begin_operation() is True
+    service.end_operation()
+
+
 def test_service_connects_and_initializes():
     service = SasService(FakeBackend())
     result = service.connect("oda", "cfg.py")

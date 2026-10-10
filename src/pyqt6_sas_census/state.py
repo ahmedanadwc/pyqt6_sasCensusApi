@@ -1,8 +1,7 @@
 """Typed application state and page unlock rules for the wizard."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
-
 
 _DEFAULT_STATUS = "⚪ SAS Disconnected (Preview & Code Export mode)"
 
@@ -51,11 +50,7 @@ class WizardState:
     step3_selected_endpoint: str = ""
     step3_endpoint_selected: bool = False
     # Per-dataset query fields keyed by ds_unique_id
-    step3_query_fields: dict[str, dict[str, str]] = None
-
-    def __post_init__(self):
-        if self.step3_query_fields is None:
-            self.step3_query_fields = {}
+    step3_query_fields: dict[str, dict[str, str]] = field(default_factory=dict)
 
     def reset_after_disconnect(self) -> "WizardState":
         """Clear the active session and all state that depends on it."""

@@ -1,9 +1,7 @@
 """SAS backend for the PyQt6 SAS Census application.
 
-Self-contained replacement for the standalone SASBackend from
-``py_sascensusapi.sas_backend``. Uses this app's own ``config`` module
-for paths and defaults so the PyQt6 app does not depend on the
-standalone source package for SAS session management.
+Manages the SASPy session, macro execution and the cached retrieval of SAS
+tables as DataFrames. Paths and defaults come from this app's ``config`` module.
 """
 
 import hashlib
@@ -11,21 +9,23 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any, Optional, Tuple, Dict
+from typing import Any
 
 import duckdb
 import pandas as pd
 
 from pyqt6_sas_census.config import (
-    SAS_PROJECT_ROOT,
-    SAS_MACRO_DIRS,
     DEFAULT_SAS_CFGFILE,
+    SAS_PROJECT_ROOT,
 )
 
 logger = logging.getLogger(__name__)
 
 # Cache directory for Parquet files
 DF_CACHE_DIR = Path.home() / ".cache" / "pyqt6_sas_census" / "dataframes"
+# Disk cache limits: least-recently-used files are pruned beyond either bound.
+DF_CACHE_MAX_FILES = 20
+DF_CACHE_MAX_BYTES = 200 * 1024 * 1024
 
 
 def _read_parquet(path: Path) -> pd.DataFrame:
@@ -47,31 +47,71 @@ def _write_parquet(df: pd.DataFrame, path: Path) -> None:
         tmp.unlink(missing_ok=True)
 
 
+def _prune_cache(
+    cache_dir: Path,
+    keep: Path | None = None,
+    max_files: int = DF_CACHE_MAX_FILES,
+    max_bytes: int = DF_CACHE_MAX_BYTES,
+) -> None:
+    """Delete least-recently-used parquet files until the cache fits its limits.
+
+    Read hits refresh a file's mtime, so mtime order is LRU order. *keep* (the
+    file just written) is never deleted. Leftover ``.tmp`` files are removed.
+    """
+    if not cache_dir.exists():
+        return
+    for tmp in cache_dir.glob("*.tmp"):
+        tmp.unlink(missing_ok=True)
+
+    entries = []
+    for f in cache_dir.glob("*.parquet"):
+        try:
+            st = f.stat()
+        except OSError:
+            continue
+        entries.append((st.st_mtime, st.st_size, f))
+    entries.sort(key=lambda e: e[0])  # oldest first
+
+    total_files = len(entries)
+    total_bytes = sum(e[1] for e in entries)
+    for _, size, f in entries:
+        if total_files <= max_files and total_bytes <= max_bytes:
+            break
+        if keep is not None and f == keep:
+            continue
+        try:
+            f.unlink()
+        except OSError:
+            continue
+        total_files -= 1
+        total_bytes -= size
+
+
 class SASBackend:
     """Manages the SASPy session and macro executions."""
 
     def __init__(
         self,
         cfgname: str = "oda",
-        cfgfile: Optional[str] = DEFAULT_SAS_CFGFILE,
+        cfgfile: str | None = DEFAULT_SAS_CFGFILE,
     ) -> None:
-        self._sas: Optional[Any] = None
-        self._cfgname: Optional[str] = cfgname
-        self._cfgfile: Optional[str] = cfgfile if cfgfile else None
-        self._df_cache: Dict[str, pd.DataFrame] = {}
+        self._sas: Any | None = None
+        self._cfgname: str | None = cfgname
+        self._cfgfile: str | None = cfgfile if cfgfile else None
+        self._df_cache: dict[str, pd.DataFrame] = {}
 
     @property
     def is_connected(self) -> bool:
         return self._sas is not None
 
-    def get_session(self) -> Optional[Any]:
+    def get_session(self) -> Any | None:
         return self._sas
 
     def connect(
         self,
-        cfgname: Optional[str] = None,
-        cfgfile: Optional[str] = None,
-    ) -> Tuple[bool, str]:
+        cfgname: str | None = None,
+        cfgfile: str | None = None,
+    ) -> tuple[bool, str]:
         """Establish a connection using SASPy."""
         if cfgname:
             self._cfgname = cfgname
@@ -85,7 +125,7 @@ class SASBackend:
             logger.warning("saspy package is not installed; SAS backend disabled.")
             return False, "saspy not installed"
 
-        kwargs: Dict[str, Any] = {}
+        kwargs: dict[str, Any] = {}
         if self._cfgname:
             kwargs["cfgname"] = self._cfgname
         if self._cfgfile:
@@ -104,8 +144,9 @@ class SASBackend:
         if self._sas:
             try:
                 self._sas.endsas()
-            except Exception as exc:
-                logger.warning("Error ending SAS session: %s", exc)
+            except Exception:
+                logger.exception("Error ending SAS session.")
+                raise
             finally:
                 self._sas = None
                 self._cfgname = None
@@ -119,7 +160,7 @@ class SASBackend:
             for f in DF_CACHE_DIR.glob("*.parquet"):
                 f.unlink(missing_ok=True)
 
-    def _table_stamp(self, table_name: str, libref: str) -> Optional[str]:
+    def _table_stamp(self, table_name: str, libref: str) -> str | None:
         """Cheap freshness token (modate|nobs) read from SAS; None if unavailable."""
         if self._sas is None:
             return None
@@ -145,7 +186,7 @@ class SASBackend:
         self,
         proj_root: str = str(SAS_PROJECT_ROOT),
         api_key: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Configure SASAUTOS, APILIB libname, and global macro variables."""
         if not self.is_connected:
             return {"success": False, "log": "SAS is not connected."}
@@ -181,7 +222,7 @@ options fmtsearch=(WORK apilib);
 """
         return self.submit_code(setup_code)
 
-    def submit_code(self, code: str) -> Dict[str, Any]:
+    def submit_code(self, code: str) -> dict[str, Any]:
         """Submit SAS code and return logs and execution details."""
         if not self.is_connected or self._sas is None:
             return {
@@ -198,7 +239,7 @@ options fmtsearch=(WORK apilib);
             lst = res.get("LST", "")
 
             # Detect errors and warnings in SAS log
-            errors = re.findall(r"^ERROR:.*$", log, flags=re.MULTILINE)
+            errors = re.findall(r"^ERROR(?: \d+-\d+)?:.*$", log, flags=re.MULTILINE)
             warnings = re.findall(r"^WARNING:.*$", log, flags=re.MULTILINE)
 
             return {
@@ -222,9 +263,9 @@ options fmtsearch=(WORK apilib);
         self,
         table_name: str,
         libref: str = "WORK",
-        ds_opts: Optional[Dict[str, Any]] = None,
+        ds_opts: dict[str, Any] | None = None,
         force_refresh: bool = False,
-    ) -> Optional[pd.DataFrame]:
+    ) -> pd.DataFrame | None:
         """Retrieve a SAS table into a pandas DataFrame, cached by table, options and modify-time."""
         if not self.is_connected or self._sas is None:
             return None
@@ -245,6 +286,10 @@ options fmtsearch=(WORK apilib);
                 try:
                     df = _read_parquet(parquet)
                     self._df_cache[key] = df
+                    try:
+                        parquet.touch()  # mark as recently used for pruning
+                    except OSError:
+                        pass
                     return df.copy()
                 except Exception as exc:
                     logger.warning(
@@ -267,14 +312,18 @@ options fmtsearch=(WORK apilib);
             self._df_cache[key] = df
             try:
                 DF_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-                _write_parquet(df, DF_CACHE_DIR / f"{key}.parquet")
+                target = DF_CACHE_DIR / f"{key}.parquet"
+                _write_parquet(df, target)
+                _prune_cache(DF_CACHE_DIR, keep=target)
             except Exception as exc:
                 logger.info(
                     "Parquet cache write skipped for %s.%s: %s", libref, table_name, exc
                 )
         return df.copy() if df is not None else None
 
-    def find_step3_tables(self, ds_unique_id: str) -> Dict[str, str]:
+    def find_step3_tables(
+        self, ds_unique_id: str, force_refresh: bool = False
+    ) -> dict[str, str]:
         """Find profile tables created by %censusapi_getDsFullInfo in APILIB.
 
         Tables are named like <libref>_<ds_unique_id>_<suffix>, e.g. APILIB._45_CPS_1995_VARS
@@ -290,7 +339,10 @@ options fmtsearch=(WORK apilib);
 
         # Query SASHELP.VTABLE for tables in APILIB
         members = self.fetch_dataframe(
-            "VTABLE", "SASHELP", ds_opts={"WHERE": "(libname='APILIB')"}
+            "VTABLE",
+            "SASHELP",
+            ds_opts={"WHERE": "(libname='APILIB')"},
+            force_refresh=force_refresh,
         )
         if members is None or members.empty:
             return {}
