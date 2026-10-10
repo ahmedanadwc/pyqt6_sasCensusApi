@@ -22,7 +22,6 @@ The wizard tracks shared state in the `WizardState` class and delegates all SASâ
 |-----------|-----------------|
 | `src/` | `WizardState` (`state.py`), `OperationResult` (`services/sas_service.py`), `SasLogWidget` (`ui/widgets.py`) |
 | `tests/` | `FakeBackend` (`test_sas_service.py`), `_service` (`test_page_status_label.py`) |
-| `resume_evaluator/` | Helper utilities for evaluating resume files |
 
 **Main entry point**: [`app.py`](file:///D:/Projects/Python/pyqt6_sasCensusApi/app.py) â€“ creates the Qt `QApplication`, builds a `WizardWindow`, and starts the event loop.
 
