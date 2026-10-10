@@ -1,6 +1,7 @@
 """Pandas DataFrame model for Qt views."""
 
 from typing import Any
+
 import pandas as pd
 from PyQt6.QtCore import QAbstractTableModel, QModelIndex, Qt
 

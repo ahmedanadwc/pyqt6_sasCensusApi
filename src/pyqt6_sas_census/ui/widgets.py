@@ -1,36 +1,35 @@
 """Reusable Qt widgets for the wizard."""
 
 from pathlib import Path
-from typing import Optional, List
+
 import pandas as pd
 from PyQt6.QtCore import (
+    QRegularExpression,
+    QSortFilterProxyModel,
     Qt,
+    QTimer,
     pyqtSignal,
     pyqtSlot,
-    QSortFilterProxyModel,
-    QRegularExpression,
-    QItemSelection,
-    QTimer,
 )
+from PyQt6.QtGui import QColor, QFont, QSyntaxHighlighter, QTextCharFormat
 from PyQt6.QtWidgets import (
-    QPlainTextEdit,
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
+    QAbstractItemView,
+    QApplication,
+    QComboBox,
+    QFileDialog,
     QGridLayout,
-    QPushButton,
+    QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
-    QTableView,
-    QFileDialog,
-    QHeaderView,
-    QAbstractItemView,
-    QToolButton,
-    QApplication,
+    QPlainTextEdit,
+    QPushButton,
     QSizePolicy,
-    QComboBox,
+    QTableView,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QSyntaxHighlighter
 
 from pyqt6_sas_census.models.dataframe_model import DataFrameModel
 
@@ -71,7 +70,7 @@ class SasLogWidget(QWidget):
 
     def __init__(
         self,
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
         title: str = "SAS Log",
         expanded: bool = True,
     ) -> None:
@@ -218,7 +217,7 @@ class SasLogWidget(QWidget):
 class CodePreviewWidget(QWidget):
     """Read-only SAS code editor with save action."""
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -258,7 +257,7 @@ class CollapsibleCodeWidget(QWidget):
 
     def __init__(
         self,
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
         title: str = "Generated SAS Code",
         expanded: bool = True,
     ) -> None:
@@ -390,7 +389,7 @@ class DataFrameWidget(QWidget):
 
     def __init__(
         self,
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
         auto_resize_columns: bool = False,
         multi_select: bool = False,
     ) -> None:
@@ -510,7 +509,7 @@ class DataFrameWidget(QWidget):
         """Clear all row selections."""
         self._view.clearSelection()
 
-    def selected_rows(self) -> List[dict]:
+    def selected_rows(self) -> list[dict]:
         """Return all selected rows as a list of dicts."""
         indexes = self._view.selectionModel().selectedRows()
         rows = []

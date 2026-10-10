@@ -1,6 +1,6 @@
 """Cascading Region > Division > State selector dialog (mirrors the Streamlit version)."""
 
-from typing import Callable, List, Optional, Tuple
+from collections.abc import Callable
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
@@ -35,7 +35,7 @@ class GeoSelectorDialog(QDialog):
     def __init__(
         self,
         current_in: str = "",
-        on_apply: Optional[Callable[[List[dict], str], None]] = None,
+        on_apply: Callable[[list[dict], str], None] | None = None,
         parent=None,
     ):
         super().__init__(parent)
@@ -46,11 +46,11 @@ class GeoSelectorDialog(QDialog):
         self._rows = load_geo_rows()
 
         initial, unmatched = selection_from_in_clause(self._rows, current_in)
-        self._regions: List[str] = list(dict.fromkeys(region_label(r) for r in initial))
-        self._divisions: List[str] = list(
+        self._regions: list[str] = list(dict.fromkeys(region_label(r) for r in initial))
+        self._divisions: list[str] = list(
             dict.fromkeys(division_label(r) for r in initial)
         )
-        self._states: List[str] = list(dict.fromkeys(state_label(r) for r in initial))
+        self._states: list[str] = list(dict.fromkeys(state_label(r) for r in initial))
         self._unmatched = unmatched
 
         self._setup_ui()
@@ -58,7 +58,7 @@ class GeoSelectorDialog(QDialog):
 
     # === UI ===
 
-    def _make_column(self, title: str) -> Tuple[QGroupBox, QListWidget]:
+    def _make_column(self, title: str) -> tuple[QGroupBox, QListWidget]:
         group = QGroupBox(title)
         box = QVBoxLayout(group)
         lst = QListWidget()
@@ -119,7 +119,7 @@ class GeoSelectorDialog(QDialog):
     # === State handling ===
 
     @staticmethod
-    def _checked(lst: QListWidget) -> List[str]:
+    def _checked(lst: QListWidget) -> list[str]:
         return [
             lst.item(i).text()
             for i in range(lst.count())
@@ -127,7 +127,7 @@ class GeoSelectorDialog(QDialog):
         ]
 
     @staticmethod
-    def _fill(lst: QListWidget, options: List[str], selected: List[str]) -> None:
+    def _fill(lst: QListWidget, options: list[str], selected: list[str]) -> None:
         lst.blockSignals(True)
         lst.clear()
         for opt in options:
@@ -168,7 +168,7 @@ class GeoSelectorDialog(QDialog):
         lst.blockSignals(False)
         self._on_item_changed(None)  # type: ignore[arg-type]
 
-    def _selection(self) -> List[dict]:
+    def _selection(self) -> list[dict]:
         return build_selection(self._rows, self._regions, self._divisions, self._states)
 
     def _update_summary(self) -> None:
@@ -187,7 +187,7 @@ class GeoSelectorDialog(QDialog):
 
 
 def open_geo_dialog(
-    current_in: str, on_apply: Callable[[List[dict], str], None], parent=None
+    current_in: str, on_apply: Callable[[list[dict], str], None], parent=None
 ) -> None:
     """Open the geography selector dialog."""
     GeoSelectorDialog(current_in, on_apply, parent).exec()

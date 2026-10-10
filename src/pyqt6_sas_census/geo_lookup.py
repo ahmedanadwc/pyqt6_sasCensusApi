@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import List, Dict, Tuple
-
 
 _PKG_DIR = Path(__file__).resolve().parent
 GEO_JSON_NAME = "census_reg_div_lkup.json"
@@ -23,9 +21,9 @@ def find_geo_json() -> Path:
     raise FileNotFoundError(f"{GEO_JSON_NAME} not found (searched: {searched})")
 
 
-def flatten_hierarchy(data: dict) -> List[dict]:
+def flatten_hierarchy(data: dict) -> list[dict]:
     """Flatten the region > division > state JSON into one full-path dict per state."""
-    rows: List[dict] = []
+    rows: list[dict] = []
     for region_id, region in data.get("census_regions", {}).items():
         for division_id, division in region.get("divisions", {}).items():
             for fips, state in division.get("states", {}).items():
@@ -43,14 +41,14 @@ def flatten_hierarchy(data: dict) -> List[dict]:
     return rows
 
 
-def load_geo_rows(path: str | None = None) -> List[dict]:
+def load_geo_rows(path: str | None = None) -> list[dict]:
     """Load and flatten the lookup JSON once."""
     json_path = Path(path) if path else find_geo_json()
     with open(json_path, "r", encoding="utf-8") as f:
         return flatten_hierarchy(json.load(f))
 
 
-def _unique(values) -> List[str]:
+def _unique(values) -> list[str]:
     return list(dict.fromkeys(values))
 
 
@@ -69,23 +67,23 @@ def state_label(row: dict) -> str:
     return f"{row['state']} - {row['state_abbrev']} ({row['state_fips']})"
 
 
-def region_options(rows: List[dict]) -> List[str]:
+def region_options(rows: list[dict]) -> list[str]:
     return _unique(region_label(r) for r in rows)
 
 
-def division_options(rows: List[dict], regions: List[str]) -> List[str]:
+def division_options(rows: list[dict], regions: list[str]) -> list[str]:
     """Division labels that belong to any of the selected region labels."""
     return _unique(division_label(r) for r in rows if region_label(r) in regions)
 
 
-def state_options(rows: List[dict], divisions: List[str]) -> List[str]:
+def state_options(rows: list[dict], divisions: list[str]) -> list[str]:
     """State labels that belong to any of the selected division labels."""
     return _unique(state_label(r) for r in rows if division_label(r) in divisions)
 
 
 def build_selection(
-    rows: List[dict], regions: List[str], divisions: List[str], states: List[str]
-) -> List[dict]:
+    rows: list[dict], regions: list[str], divisions: list[str], states: list[str]
+) -> list[dict]:
     """One full-path dict per selected state, kept only if its region and division are selected too.
 
     `regions`, `divisions` and `states` are the display labels ('<Name> (key)').
@@ -99,7 +97,7 @@ def build_selection(
     ]
 
 
-def in_clause(selection: List[dict]) -> str:
+def in_clause(selection: list[dict]) -> str:
     """Build the Census API in= clause from selected states, or '' when nothing is selected."""
     fips = _unique(r["state_fips"] for r in selection)
     return f"in=state:{','.join(fips)}" if fips else ""
@@ -108,12 +106,12 @@ def in_clause(selection: List[dict]) -> str:
 _STATE_PART = re.compile(r"^(?:in=)?state:", re.IGNORECASE)
 
 
-def parse_state_fips(in_text: str) -> List[str]:
+def parse_state_fips(in_text: str) -> list[str]:
     """Extract the state FIPS codes from an in= clause such as 'in=state:09,23' (['*'] for state:*).
 
     Other in= parameters (county:..., etc.) are ignored; single digits are zero padded.
     """
-    fips: List[str] = []
+    fips: list[str] = []
     for part in str(in_text or "").split("&"):
         part = part.strip()
         if _STATE_PART.match(part):
@@ -124,8 +122,8 @@ def parse_state_fips(in_text: str) -> List[str]:
 
 
 def selection_from_in_clause(
-    rows: List[dict], in_text: str
-) -> Tuple[List[dict], List[str]]:
+    rows: list[dict], in_text: str
+) -> tuple[list[dict], list[str]]:
     """Map the states in an in= clause to full-path rows; also return values not in the lookup."""
     fips = parse_state_fips(in_text)
     if "*" in fips:
@@ -135,7 +133,7 @@ def selection_from_in_clause(
     return selection, [f for f in fips if f not in known]
 
 
-def merge_in_clause(existing: str, selection: List[dict]) -> str:
+def merge_in_clause(existing: str, selection: list[dict]) -> str:
     """Replace the state part of an in= clause with the selection, keeping any other in= parts."""
     others = [
         p.strip()

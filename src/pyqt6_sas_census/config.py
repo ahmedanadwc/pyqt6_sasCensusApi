@@ -1,9 +1,7 @@
 """Server settings for the PyQt6 SAS Census application.
 
-Mirrors the defaults provided by ``py_sascensusapi.config`` in the
-Standalone source package so the PyQt6 app can prefill UI fields
-and supply sensible defaults to ``run_environment_setup`` without
-hardcoding them.
+Resolves the SAS project root and config file from the environment and
+supplies the defaults the UI prefills and ``run_environment_setup`` uses.
 """
 
 import os
@@ -48,7 +46,7 @@ def _resolve_sas_cfgfile() -> str:
     return ""
 
 
-# Paths and defaults (mirrors py_sascensusapi.config)
+# Paths and defaults
 SAS_PROJECT_ROOT = _resolve_sas_project_root()
 SAS_CODE_ROOT = SAS_PROJECT_ROOT / "code"
 SAS_MACRO_ROOT = SAS_CODE_ROOT / "macros"

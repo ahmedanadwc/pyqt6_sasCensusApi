@@ -9,8 +9,8 @@ from .programs import (
 
 __all__ = [
     "SASBackend",
-    "sas_backend",
     "build_collect_catalog_code",
     "build_profile_code",
     "build_query_code",
+    "sas_backend",
 ]
