@@ -50,8 +50,8 @@ def build_query_code(
 %censusapi_submitDataApiQuery(
     p_apiBaseURL=%STR({api_base_url})
   , p_apiGetClause=%STR({get_clause})
-  , p_apiForClause=%bquote({for_clause})
-  , p_apiInClause=%bquote({in_clause})
+  , p_apiForClause=%nrstr({for_clause})
+  , p_apiInClause=%nrstr({in_clause})
   , p_dsUniqueId={dataset_id}
   , p_outDsName={out_dataset}
   , p_dataApiKey={api_key_ref}
